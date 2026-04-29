@@ -1,0 +1,8 @@
+Dockerfile
+.cursor
+.editorconfig
+.envrc
+.git
+.gitignore
+*.md
+*.ini

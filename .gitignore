@@ -1,0 +1,17 @@
+# Build artifacts
+.bin/
+dist/
+.moon/cache
+
+# Runtime data
+.data/
+
+# Configuration and application files
+.idea/
+.task/
+.config/
+.envrc
+/config.ini
+
+# System junk
+.DS_Store

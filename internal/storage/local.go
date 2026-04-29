@@ -1,0 +1,133 @@
+package storage
+
+import (
+	"context"
+	"io"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/cockroachdb/errors"
+)
+
+var _ Backend = (*LocalBackend)(nil)
+
+type LocalBackend struct {
+	root    string
+	tempDir string
+}
+
+func NewLocalBackend(root, tempDir string) (*LocalBackend, error) {
+	if root == "" {
+		return nil, errors.New("ROOT is required")
+	}
+	if tempDir == "" {
+		return nil, errors.New("TEMP_DIR is required")
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return nil, errors.Wrap(err, "resolve local storage root")
+	}
+	absTempDir, err := filepath.Abs(tempDir)
+	if err != nil {
+		return nil, errors.Wrap(err, "resolve local storage temp dir")
+	}
+	if err := os.MkdirAll(absRoot, 0o755); err != nil {
+		return nil, errors.Wrap(err, "create local storage root")
+	}
+	return &LocalBackend{root: absRoot, tempDir: absTempDir}, nil
+}
+
+func (b *LocalBackend) storagePath(oid string) string {
+	return filepath.Join(b.root, oid[0:2], oid[2:4], oid)
+}
+
+func (b *LocalBackend) Put(ctx context.Context, oid string, r io.Reader) (string, error) {
+	if len(oid) < 4 {
+		return "", errors.Newf("invalid oid %q", oid)
+	}
+	final := b.storagePath(oid)
+	uri := "file://" + final
+
+	if _, err := os.Stat(final); err == nil {
+		if _, err := io.Copy(io.Discard, r); err != nil {
+			return "", errors.Wrap(err, "drain body for existing object")
+		}
+		return uri, nil
+	}
+
+	if err := os.MkdirAll(b.tempDir, 0o755); err != nil {
+		return "", errors.Wrap(err, "create temp dir")
+	}
+	tmp, err := os.CreateTemp(b.tempDir, "upload-*")
+	if err != nil {
+		return "", errors.Wrap(err, "create temp file")
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := io.Copy(tmp, r); err != nil {
+		_ = tmp.Close()
+		return "", errors.Wrap(err, "copy to temp file")
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return "", errors.Wrap(err, "sync temp file")
+	}
+	if err := tmp.Close(); err != nil {
+		return "", errors.Wrap(err, "close temp file")
+	}
+
+	if err := os.MkdirAll(filepath.Dir(final), 0o755); err != nil {
+		return "", errors.Wrap(err, "create object dir")
+	}
+	if err := os.Rename(tmpPath, final); err != nil && !os.IsExist(err) {
+		return "", errors.Wrap(err, "rename to final path")
+	}
+	return uri, nil
+}
+
+func (b *LocalBackend) Open(ctx context.Context, uri string) (io.ReadCloser, error) {
+	path, err := b.pathFromURI(uri)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, errors.WithStack(ErrNotFound)
+		}
+		return nil, errors.Wrap(err, "open object file")
+	}
+	return f, nil
+}
+
+func (b *LocalBackend) Delete(ctx context.Context, uri string) error {
+	path, err := b.pathFromURI(uri)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return errors.Wrap(err, "delete object file")
+	}
+	return nil
+}
+
+func (b *LocalBackend) pathFromURI(uri string) (string, error) {
+	u, err := url.Parse(uri)
+	if err != nil {
+		return "", errors.Wrapf(err, "parse storage uri %q", uri)
+	}
+	if u.Scheme != "file" {
+		return "", errors.Newf("unsupported scheme %q in uri %q", u.Scheme, uri)
+	}
+	path, err := filepath.Abs(u.Path)
+	if err != nil {
+		return "", errors.Wrapf(err, "resolve storage uri path %q", u.Path)
+	}
+	if !strings.HasPrefix(path, b.root+string(filepath.Separator)) && path != b.root {
+		return "", errors.Newf("uri path %q escapes root %q", path, b.root)
+	}
+	return path, nil
+}

@@ -1,0 +1,54 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+language: 'go'
+stack: 'backend'
+id: 'git-lfs-server'
+
+fileGroups:
+  sources:
+    - 'cmd/**/*.go'
+    - 'internal/**/*.go'
+  tests:
+    - '**/*_test.go'
+  configs:
+    - 'go.mod'
+    - 'go.sum'
+
+tasks:
+  install:
+    command: 'go mod tidy'
+    inputs:
+      - '@group(configs)'
+
+  lint:
+    command: 'golangci-lint run'
+    inputs:
+      - '@group(sources)'
+      - '@group(configs)'
+    deps:
+      - 'install'
+
+  test:
+    command: 'go test ./...'
+    inputs:
+      - '@group(sources)'
+      - '@group(tests)'
+      - '@group(configs)'
+    deps:
+      - 'install'
+
+  build:
+    command: 'go build -o /dev/null ./...'
+    inputs:
+      - '@group(sources)'
+      - '@group(configs)'
+    deps:
+      - 'install'
+
+  dev:
+    command: 'go run ./cmd/lfsd'
+    preset: 'server'
+    deps:
+      - 'install'
+    options:
+      runFromWorkspaceRoot: true
