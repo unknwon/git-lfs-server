@@ -172,7 +172,12 @@ func serveBatch(db *database.DB, externalURL string, maxObjectSize int64) flameg
 						Message: fmt.Sprintf("object size %d exceeds limit %d", in.Size, maxObjectSize),
 					}
 				case ok && ptrx.Deref(obj.Size, -1) == in.Size:
-					// Already uploaded; omit actions.
+					// Cross-repo dedup: object is verified globally, ensure
+					// the calling repo is linked so future downloads succeed.
+					if err := db.LinkRepoToObject(ctx, repoName, in.OID); err != nil {
+						logger.ErrorContext(ctx, "Failed to link repo to existing object", "oid", in.OID, "error", err)
+						respObj.Error = &batchObjectError{Code: http.StatusInternalServerError, Message: "failed to link object to repo"}
+					}
 				case ok && ptrx.Deref(obj.Size, -1) != in.Size:
 					respObj.Error = &batchObjectError{Code: http.StatusConflict, Message: "OID exists with different size"}
 				default:

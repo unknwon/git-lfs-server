@@ -119,6 +119,46 @@ WHERE id = @id`,
 	return storedURI, nil
 }
 
+// LinkRepoToObject links an existing verified object to repoName. Used by the
+// batch endpoint when a client uploads an OID that another repo has already
+// verified, so cross-repo dedup doesn't leave the calling repo unable to
+// download. Returns ErrObjectNotFound if the OID has no verified row yet.
+func (d *DB) LinkRepoToObject(ctx context.Context, repoName, oid string) error {
+	return d.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var object Object
+		if err := tx.Raw(
+			`SELECT * FROM objects WHERE oid = @oid AND verified_at IS NOT NULL LIMIT 1`,
+			map[string]any{"oid": oid},
+		).Scan(&object).Error; err != nil {
+			return errors.Wrap(err, "select verified object")
+		}
+		if object.ID == 0 {
+			return errors.WithStack(ErrObjectNotFound)
+		}
+
+		res := tx.Exec(`
+INSERT INTO repo_objects (repo_name, object_id, created_at)
+VALUES (@repoName, @objectID, now())
+ON CONFLICT (repo_name, object_id) DO NOTHING`,
+			map[string]any{"repoName": repoName, "objectID": object.ID},
+		)
+		if res.Error != nil {
+			return errors.Wrap(res.Error, "upsert repo object")
+		}
+		if res.RowsAffected > 0 {
+			if err := tx.Exec(`
+UPDATE objects
+SET repo_count = (SELECT COUNT(*) FROM repo_objects WHERE object_id = @id)
+WHERE id = @id`,
+				map[string]any{"id": object.ID},
+			).Error; err != nil {
+				return errors.Wrap(err, "update repo_count")
+			}
+		}
+		return nil
+	})
+}
+
 // InsertPendingObject inserts a row with NULL size/object_uri/verified_at only if
 // no row exists for oid.
 func (d *DB) InsertPendingObject(ctx context.Context, oid string) error {
