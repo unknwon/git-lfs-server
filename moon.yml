@@ -50,5 +50,9 @@ tasks:
     preset: 'server'
     deps:
       - 'install'
+    env:
+      # Forces charm.land/log color output even though moon runs the task as a
+      # subprocess (no TTY on stdout).
+      TTY_FORCE: '1'
     options:
       runFromWorkspaceRoot: true

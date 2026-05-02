@@ -13,11 +13,14 @@ import (
 	"unknwon.dev/git-lfs-server/internal/storage"
 )
 
+// Host is the host of a forge, e.g., "github.com".
+type Host = string
+
 type Config struct {
 	Server   ServerConfig
 	Database database.Config
-	Forges   map[string]forge.Provider  // key: host (e.g., "github.com")
-	Storages map[string]storage.Backend // key: host (e.g., "github.com")
+	Forges   map[Host]forge.Provider
+	Storages map[Host]storage.Backend
 	Log      LogConfig
 }
 
@@ -60,31 +63,52 @@ func loadConfig(customPath string) (*Config, error) {
 		return nil, errors.Wrap(err, `map [log] config`)
 	}
 
-	backendsByType := make(map[storage.Type]storage.Backend)
+	backendsByName := make(map[string]storage.Backend)
 	for _, s := range f.Sections() {
 		rest, ok := strings.CutPrefix(s.Name(), storageSectionPrefix)
 		if !ok {
 			continue
 		}
-		typeName, ok := strings.CutSuffix(rest, `"`)
+		name, ok := strings.CutSuffix(rest, `"`)
 		if !ok {
 			return nil, errors.Newf("malformed storage section name %q", s.Name())
 		}
-		t := storage.Type(typeName)
+		if _, dup := backendsByName[name]; dup {
+			return nil, errors.Newf("duplicate storage configuration for name %q", name)
+		}
+		scheme := s.Key("SCHEME").String()
+		if err := validateStorageScheme(scheme); err != nil {
+			return nil, errors.Wrapf(err, "storage %q", name)
+		}
+		t := storage.Type(s.Key("TYPE").String())
 		switch t {
-		case storage.TypeLocal:
-			b, err := storage.NewLocalBackend(s.Key("ROOT").String(), s.Key("TEMP_DIR").String())
+		case storage.TypeFilesystem:
+			b, err := storage.NewFilesystemBackend(scheme, s.Key("ROOT").String(), s.Key("TEMP_DIR").String())
 			if err != nil {
-				return nil, errors.Wrapf(err, "init storage %q", typeName)
+				return nil, errors.Wrapf(err, "init storage %q", name)
 			}
-			backendsByType[t] = b
+			backendsByName[name] = b
+		case storage.TypeS3Presign:
+			b, err := storage.NewS3PresignBackend(
+				scheme,
+				s.Key("BUCKET").String(),
+				s.Key("ACCESS_KEY_ID").String(),
+				s.Key("SECRET_ACCESS_KEY").String(),
+				s.Key("ENDPOINT").String(),
+			)
+			if err != nil {
+				return nil, errors.Wrapf(err, "init storage %q", name)
+			}
+			backendsByName[name] = b
+		case "":
+			return nil, errors.Newf("storage %q is missing required key %q", name, "TYPE")
 		default:
-			return nil, errors.Newf("unknown storage type %q", typeName)
+			return nil, errors.Newf(`storage %q has unknown TYPE %q`, name, t)
 		}
 	}
 
 	c.Forges = make(map[string]forge.Provider)
-	c.Storages = make(map[string]storage.Backend)
+	c.Storages = make(map[string]any)
 	for _, s := range f.Sections() {
 		rest, ok := strings.CutPrefix(s.Name(), forgeSectionPrefix)
 		if !ok {
@@ -102,7 +126,10 @@ func loadConfig(customPath string) (*Config, error) {
 		if err := s.MapTo(&fc); err != nil {
 			return nil, errors.Wrapf(err, "map [forge %q] config", host)
 		}
-		backend, ok := backendsByType[fc.Storage]
+		if fc.Storage == "" {
+			return nil, errors.Newf("forge %q is missing required key %q", host, "STORAGE")
+		}
+		backend, ok := backendsByName[fc.Storage]
 		if !ok {
 			return nil, errors.Newf("forge %q references unconfigured storage %q", host, fc.Storage)
 		}
@@ -123,4 +150,14 @@ func loadConfig(customPath string) (*Config, error) {
 	}
 
 	return &c, nil
+}
+
+func validateStorageScheme(scheme string) error {
+	if scheme == "" {
+		return errors.New("SCHEME is required")
+	}
+	if !strings.HasSuffix(scheme, "://") {
+		return errors.Newf("SCHEME %q must end with %q", scheme, "://")
+	}
+	return nil
 }

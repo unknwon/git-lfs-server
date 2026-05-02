@@ -6,11 +6,10 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"unknwon.dev/git-lfs-server/internal/logx"
-	"unknwon.dev/git-lfs-server/internal/storage"
 )
 
 // Type identifies a forge implementation. The value is used in ini
-// configuration as the TYPE key under [forge "<host>"].
+// configuration as the TYPE key under [forge "{host}"].
 type Type string
 
 const (
@@ -28,8 +27,10 @@ const (
 
 // Config is the per-forge ini section payload, e.g. [forge "github.com"].
 type Config struct {
-	Type    Type         `ini:"TYPE"`
-	Storage storage.Type `ini:"STORAGE"`
+	Type Type `ini:"TYPE"`
+	// Storage is the name of a [storage "{name}"] section, not the backend's
+	// TYPE. Multiple forges may share the same storage.
+	Storage string `ini:"STORAGE"`
 	// SkipAuth bypasses forge token verification and grants write access to
 	// every request. For local development only. Loaders MUST surface a
 	// warning for any forge that has this enabled.
@@ -47,7 +48,7 @@ var ErrTokenInvalid = errors.New("forge: token is invalid or lacks repository ac
 
 // SkipAuthProvider wraps another Provider and short-circuits Authorize to
 // always return PermissionWrite without contacting the underlying forge.
-// Used only when [forge "<host>"] sets SKIP_AUTH = true.
+// Used only when [forge "{host}"] sets SKIP_AUTH = true.
 type SkipAuthProvider struct{}
 
 func (SkipAuthProvider) Authorize(ctx context.Context, logger *logx.Logger, repo, token string) (Permission, error) {
