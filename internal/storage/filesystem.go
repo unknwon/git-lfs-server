@@ -11,14 +11,15 @@ import (
 	"github.com/cockroachdb/errors"
 )
 
-var _ Backend = (*LocalBackend)(nil)
+var _ Proxier = (*FilesystemBackend)(nil)
 
-type LocalBackend struct {
+type FilesystemBackend struct {
+	scheme  string
 	root    string
 	tempDir string
 }
 
-func NewLocalBackend(root, tempDir string) (*LocalBackend, error) {
+func NewFilesystemBackend(scheme, root, tempDir string) (*FilesystemBackend, error) {
 	if root == "" {
 		return nil, errors.New("ROOT is required")
 	}
@@ -27,33 +28,27 @@ func NewLocalBackend(root, tempDir string) (*LocalBackend, error) {
 	}
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
-		return nil, errors.Wrap(err, "resolve local storage root")
+		return nil, errors.Wrap(err, "resolve filesystem storage root")
 	}
 	absTempDir, err := filepath.Abs(tempDir)
 	if err != nil {
-		return nil, errors.Wrap(err, "resolve local storage temp dir")
+		return nil, errors.Wrap(err, "resolve filesystem storage temp dir")
 	}
-	if err := os.MkdirAll(absRoot, 0o755); err != nil {
-		return nil, errors.Wrap(err, "create local storage root")
-	}
-	return &LocalBackend{root: absRoot, tempDir: absTempDir}, nil
+	return &FilesystemBackend{scheme: scheme, root: absRoot, tempDir: absTempDir}, nil
 }
 
-func (b *LocalBackend) storagePath(oid string) string {
+func (b *FilesystemBackend) storagePath(oid string) string {
 	return filepath.Join(b.root, oid[0:2], oid[2:4], oid)
 }
 
-func (b *LocalBackend) Put(ctx context.Context, oid string, r io.Reader) (string, error) {
+func (b *FilesystemBackend) Put(ctx context.Context, oid string, r io.Reader) (string, error) {
 	if len(oid) < 4 {
 		return "", errors.Newf("invalid oid %q", oid)
 	}
 	final := b.storagePath(oid)
-	uri := "file://" + final
+	uri := b.scheme + final
 
 	if _, err := os.Stat(final); err == nil {
-		if _, err := io.Copy(io.Discard, r); err != nil {
-			return "", errors.Wrap(err, "drain body for existing object")
-		}
 		return uri, nil
 	}
 
@@ -82,13 +77,13 @@ func (b *LocalBackend) Put(ctx context.Context, oid string, r io.Reader) (string
 	if err := os.MkdirAll(filepath.Dir(final), 0o755); err != nil {
 		return "", errors.Wrap(err, "create object dir")
 	}
-	if err := os.Rename(tmpPath, final); err != nil && !os.IsExist(err) {
+	if err := os.Rename(tmpPath, final); err != nil {
 		return "", errors.Wrap(err, "rename to final path")
 	}
 	return uri, nil
 }
 
-func (b *LocalBackend) Open(ctx context.Context, uri string) (io.ReadCloser, error) {
+func (b *FilesystemBackend) Open(ctx context.Context, uri string) (io.ReadCloser, error) {
 	path, err := b.pathFromURI(uri)
 	if err != nil {
 		return nil, err
@@ -103,7 +98,7 @@ func (b *LocalBackend) Open(ctx context.Context, uri string) (io.ReadCloser, err
 	return f, nil
 }
 
-func (b *LocalBackend) Delete(ctx context.Context, uri string) error {
+func (b *FilesystemBackend) Delete(ctx context.Context, uri string) error {
 	path, err := b.pathFromURI(uri)
 	if err != nil {
 		return err
@@ -114,12 +109,13 @@ func (b *LocalBackend) Delete(ctx context.Context, uri string) error {
 	return nil
 }
 
-func (b *LocalBackend) pathFromURI(uri string) (string, error) {
+func (b *FilesystemBackend) pathFromURI(uri string) (string, error) {
 	u, err := url.Parse(uri)
 	if err != nil {
 		return "", errors.Wrapf(err, "parse storage uri %q", uri)
 	}
-	if u.Scheme != "file" {
+	wantScheme := strings.TrimSuffix(b.scheme, "://")
+	if u.Scheme != wantScheme {
 		return "", errors.Newf("unsupported scheme %q in uri %q", u.Scheme, uri)
 	}
 	path, err := filepath.Abs(u.Path)

@@ -113,6 +113,21 @@ func New(ctx context.Context, logger *logx.Logger, cfg Config) (*DB, error) {
 		return nil, errors.Wrap(err, "auto-migrate database tables")
 	}
 
+	// AutoMigrate doesn't emit CHECK constraints. Add ours idempotently —
+	// Postgres has no "ADD CONSTRAINT IF NOT EXISTS" form for CHECK, so we
+	// catch duplicate_object via SQLSTATE.
+	if err = gormDB.Exec(`
+DO $$ BEGIN
+    ALTER TABLE objects ADD CONSTRAINT check_verified_consistency CHECK (
+        (verified_at IS NULL     AND size IS NULL     AND object_uri IS NULL)
+        OR
+        (verified_at IS NOT NULL AND size IS NOT NULL AND object_uri IS NOT NULL)
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$`).Error; err != nil {
+		return nil, errors.Wrap(err, "add check_verified_consistency constraint")
+	}
+
 	logger.InfoContext(ctx, "Database ready")
 	return &DB{db: gormDB}, nil
 }

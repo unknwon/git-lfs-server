@@ -57,7 +57,7 @@ func main() {
 		f.Post("/batch", serveBatch(db, config.Server.ExternalURL, config.Server.MaxObjectSize))
 		f.Get("/{oid}", serveDownload(db, config.Storages))
 		f.Put("/{oid}", serveUpload(db, config.Storages, config.Server.MaxObjectSize))
-		f.Post("/verify", serveVerify(db))
+		f.Post("/verify", serveVerify(db, config.Storages))
 	}, authorize(config.Forges))
 
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)

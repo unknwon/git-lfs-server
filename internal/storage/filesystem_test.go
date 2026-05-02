@@ -16,10 +16,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestBackend(t *testing.T) *LocalBackend {
+const testFilesystemScheme = "file://"
+
+func newTestBackend(t *testing.T) *FilesystemBackend {
 	t.Helper()
 	root := t.TempDir()
-	b, err := NewLocalBackend(root, filepath.Join(root, ".tmp"))
+	b, err := NewFilesystemBackend(testFilesystemScheme, root, filepath.Join(root, ".tmp"))
 	require.NoError(t, err)
 	return b
 }
@@ -29,30 +31,19 @@ func sha256Hex(s string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func TestNewLocalBackend(t *testing.T) {
+func TestNewFilesystemBackend(t *testing.T) {
 	t.Run("missing root", func(t *testing.T) {
-		_, err := NewLocalBackend("", t.TempDir())
+		_, err := NewFilesystemBackend(testFilesystemScheme, "", t.TempDir())
 		require.Error(t, err)
 	})
 
 	t.Run("missing temp dir", func(t *testing.T) {
-		_, err := NewLocalBackend(t.TempDir(), "")
+		_, err := NewFilesystemBackend(testFilesystemScheme, t.TempDir(), "")
 		require.Error(t, err)
-	})
-
-	t.Run("creates root if missing", func(t *testing.T) {
-		base := t.TempDir()
-		root := filepath.Join(base, "objects")
-		_, err := NewLocalBackend(root, filepath.Join(base, "tmp"))
-		require.NoError(t, err)
-
-		info, err := os.Stat(root)
-		require.NoError(t, err)
-		assert.True(t, info.IsDir())
 	})
 }
 
-func TestLocalBackend_Put(t *testing.T) {
+func TestFilesystemBackend_Put(t *testing.T) {
 	t.Run("round trip", func(t *testing.T) {
 		b := newTestBackend(t)
 		body := "hello world"
@@ -60,7 +51,7 @@ func TestLocalBackend_Put(t *testing.T) {
 
 		uri, err := b.Put(context.Background(), oid, strings.NewReader(body))
 		require.NoError(t, err)
-		assert.True(t, strings.HasPrefix(uri, "file://"))
+		assert.True(t, strings.HasPrefix(uri, testFilesystemScheme))
 		assert.Contains(t, uri, oid)
 
 		rc, err := b.Open(context.Background(), uri)
@@ -72,7 +63,7 @@ func TestLocalBackend_Put(t *testing.T) {
 		assert.Equal(t, body, string(got))
 	})
 
-	t.Run("skip if exists drains body and keeps file", func(t *testing.T) {
+	t.Run("skip if exists keeps file without reading body", func(t *testing.T) {
 		b := newTestBackend(t)
 		body := "duplicate"
 		oid := sha256Hex(body)
@@ -80,15 +71,15 @@ func TestLocalBackend_Put(t *testing.T) {
 		uri1, err := b.Put(context.Background(), oid, strings.NewReader(body))
 		require.NoError(t, err)
 
-		final := strings.TrimPrefix(uri1, "file://")
+		final := strings.TrimPrefix(uri1, testFilesystemScheme)
 		mtimeBefore, err := os.Stat(final)
 		require.NoError(t, err)
 
-		drained := &countingReader{src: strings.NewReader(body)}
-		uri2, err := b.Put(context.Background(), oid, drained)
+		counted := &countingReader{src: strings.NewReader(body)}
+		uri2, err := b.Put(context.Background(), oid, counted)
 		require.NoError(t, err)
 		assert.Equal(t, uri1, uri2)
-		assert.Equal(t, len(body), drained.n, "body must be fully drained")
+		assert.Equal(t, 0, counted.n, "body must not be read for existing object")
 
 		mtimeAfter, err := os.Stat(final)
 		require.NoError(t, err)
@@ -139,10 +130,10 @@ func TestLocalBackend_Put(t *testing.T) {
 	})
 }
 
-func TestLocalBackend_Open(t *testing.T) {
+func TestFilesystemBackend_Open(t *testing.T) {
 	t.Run("not found", func(t *testing.T) {
 		b := newTestBackend(t)
-		uri := "file://" + b.storagePath(sha256Hex("missing"))
+		uri := testFilesystemScheme + b.storagePath(sha256Hex("missing"))
 		_, err := b.Open(context.Background(), uri)
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, ErrNotFound))
@@ -162,7 +153,7 @@ func TestLocalBackend_Open(t *testing.T) {
 	})
 }
 
-func TestLocalBackend_Delete(t *testing.T) {
+func TestFilesystemBackend_Delete(t *testing.T) {
 	t.Run("removes existing", func(t *testing.T) {
 		b := newTestBackend(t)
 		body := "deleteme"
@@ -172,13 +163,13 @@ func TestLocalBackend_Delete(t *testing.T) {
 		require.NoError(t, err)
 
 		require.NoError(t, b.Delete(context.Background(), uri))
-		_, err = os.Stat(strings.TrimPrefix(uri, "file://"))
+		_, err = os.Stat(strings.TrimPrefix(uri, testFilesystemScheme))
 		assert.True(t, os.IsNotExist(err))
 	})
 
 	t.Run("idempotent on missing", func(t *testing.T) {
 		b := newTestBackend(t)
-		uri := "file://" + b.storagePath(sha256Hex("never-existed"))
+		uri := testFilesystemScheme + b.storagePath(sha256Hex("never-existed"))
 		require.NoError(t, b.Delete(context.Background(), uri))
 	})
 }
