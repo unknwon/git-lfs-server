@@ -17,10 +17,12 @@ import (
 	"github.com/cockroachdb/errors"
 )
 
-// presignURLTTL is the lifetime of presigned URLs handed to clients. Long
-// enough for slow networks pushing multi-GB objects, short enough that a
-// leaked URL has limited utility.
-const presignURLTTL = 15 * time.Minute
+// presignURLTTL bounds how long a client has to *initiate* the request.
+// S3/R2 validate the signature at request start; once the transfer begins
+// in-window it can run as long as needed. Because we serve presigned URLs
+// via a 307 redirect, the client follows immediately — there is no idle
+// gap to budget for. Keep this short so a leaked URL has limited utility.
+const presignURLTTL = 60 * time.Second
 
 var _ Presigner = (*S3PresignBackend)(nil)
 
