@@ -174,7 +174,9 @@ func serveBatch(db *database.DB, externalURL string, maxObjectSize int64) flameg
 				case ok && ptrx.Deref(obj.Size, -1) == in.Size:
 					// Cross-repo dedup: object is verified globally, ensure
 					// the calling repo is linked so future downloads succeed.
-					if err := db.LinkRepoToObject(ctx, repoName, in.OID); err != nil {
+					// COALESCE in LinkObject's upsert preserves the existing
+					// object_uri, so the placeholder is never written.
+					if _, err := db.LinkObject(ctx, repoName, in.OID, in.Size, "ignored"); err != nil {
 						logger.ErrorContext(ctx, "Failed to link repo to existing object", "oid", in.OID, "error", err)
 						respObj.Error = &batchObjectError{Code: http.StatusInternalServerError, Message: "failed to link object to repo"}
 					}
