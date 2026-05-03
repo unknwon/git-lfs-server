@@ -21,7 +21,7 @@ const testFilesystemScheme = "file://"
 func newTestBackend(t *testing.T) *FilesystemBackend {
 	t.Helper()
 	root := t.TempDir()
-	b, err := NewFilesystemBackend(testFilesystemScheme, root, filepath.Join(root, ".tmp"))
+	b, err := NewFilesystemBackend("test", testFilesystemScheme, root, filepath.Join(root, ".tmp"))
 	require.NoError(t, err)
 	return b
 }
@@ -33,12 +33,12 @@ func sha256Hex(s string) string {
 
 func TestNewFilesystemBackend(t *testing.T) {
 	t.Run("missing root", func(t *testing.T) {
-		_, err := NewFilesystemBackend(testFilesystemScheme, "", t.TempDir())
+		_, err := NewFilesystemBackend("test", testFilesystemScheme, "", t.TempDir())
 		require.Error(t, err)
 	})
 
 	t.Run("missing temp dir", func(t *testing.T) {
-		_, err := NewFilesystemBackend(testFilesystemScheme, t.TempDir(), "")
+		_, err := NewFilesystemBackend("test", testFilesystemScheme, t.TempDir(), "")
 		require.Error(t, err)
 	})
 }

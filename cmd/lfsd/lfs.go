@@ -1,9 +1,12 @@
 package main
 
 import (
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"regexp"
 	"slices"
@@ -118,9 +121,9 @@ func serveBatch(db *database.DB, externalURL string, maxObjectSize int64) flameg
 
 		repoName := repoNameFromContext(c)
 
-		var actionHeader map[string]string
+		var authHeader map[string]string
 		if authz := c.Request().Header.Get("Authorization"); authz != "" {
-			actionHeader = map[string]string{"Authorization": authz}
+			authHeader = map[string]string{"Authorization": authz}
 		}
 
 		oids := make([]string, len(req.Objects))
@@ -161,7 +164,7 @@ func serveBatch(db *database.DB, externalURL string, maxObjectSize int64) flameg
 					respObj.Error = &batchObjectError{Code: http.StatusUnprocessableEntity, Message: "size mismatch"}
 				default:
 					respObj.Actions = map[string]batchAction{
-						"download": {Href: objectHref(externalURL, repoName, in.OID), Header: actionHeader},
+						"download": {Href: objectHref(externalURL, repoName, in.OID), Header: authHeader},
 					}
 				}
 			case operationUpload:
@@ -183,9 +186,17 @@ func serveBatch(db *database.DB, externalURL string, maxObjectSize int64) flameg
 				case ok && ptrx.Deref(obj.Size, -1) != in.Size:
 					respObj.Error = &batchObjectError{Code: http.StatusConflict, Message: "OID exists with different size"}
 				default:
+					rawOID, err := hex.DecodeString(in.OID)
+					if err != nil {
+						respObj.Error = &batchObjectError{Code: http.StatusBadRequest, Message: fmt.Sprintf("invalid oid %q", in.OID)}
+						break
+					}
+					uploadHeader := make(map[string]string, len(authHeader)+1)
+					maps.Copy(uploadHeader, authHeader)
+					uploadHeader["x-amz-checksum-sha256"] = base64.StdEncoding.EncodeToString(rawOID)
 					respObj.Actions = map[string]batchAction{
-						"upload": {Href: objectHref(externalURL, repoName, in.OID), Header: actionHeader},
-						"verify": {Href: verifyHref(externalURL, repoName), Header: actionHeader},
+						"upload": {Href: objectHref(externalURL, repoName, in.OID), Header: uploadHeader},
+						"verify": {Href: verifyHref(externalURL, repoName), Header: authHeader},
 					}
 				}
 			}
@@ -319,7 +330,7 @@ func serveUploadPresign(c flamego.Context, logger *logx.Logger, db *database.DB,
 	w.WriteHeader(http.StatusTemporaryRedirect)
 }
 
-func serveDownload(db *database.DB, storages map[string]any) flamego.Handler {
+func serveDownload(db *database.DB, storages map[string]storage.Backend) flamego.Handler {
 	return func(c flamego.Context, logger *logx.Logger, perm forge.Permission) {
 		logger = logger.Scoped("download")
 		ctx := c.Request().Context()
@@ -415,7 +426,7 @@ func serveDownloadPresign(c flamego.Context, logger *logx.Logger, backend storag
 	w.WriteHeader(http.StatusTemporaryRedirect)
 }
 
-func serveVerify(db *database.DB, storages map[string]any) flamego.Handler {
+func serveVerify(db *database.DB, storages map[string]storage.Backend) flamego.Handler {
 	return func(c flamego.Context, logger *logx.Logger, perm forge.Permission) {
 		logger = logger.Scoped("verify")
 		ctx := c.Request().Context()

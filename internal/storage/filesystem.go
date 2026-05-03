@@ -14,12 +14,13 @@ import (
 var _ Proxier = (*FilesystemBackend)(nil)
 
 type FilesystemBackend struct {
+	name    string
 	scheme  string
 	root    string
 	tempDir string
 }
 
-func NewFilesystemBackend(scheme, root, tempDir string) (*FilesystemBackend, error) {
+func NewFilesystemBackend(name, scheme, root, tempDir string) (*FilesystemBackend, error) {
 	if root == "" {
 		return nil, errors.New("ROOT is required")
 	}
@@ -34,8 +35,12 @@ func NewFilesystemBackend(scheme, root, tempDir string) (*FilesystemBackend, err
 	if err != nil {
 		return nil, errors.Wrap(err, "resolve filesystem storage temp dir")
 	}
-	return &FilesystemBackend{scheme: scheme, root: absRoot, tempDir: absTempDir}, nil
+	return &FilesystemBackend{name: name, scheme: scheme, root: absRoot, tempDir: absTempDir}, nil
 }
+
+func (b *FilesystemBackend) Name() string { return b.name }
+
+func (*FilesystemBackend) Type() Type { return TypeFilesystem }
 
 func (b *FilesystemBackend) storagePath(oid string) string {
 	return filepath.Join(b.root, oid[0:2], oid[2:4], oid)

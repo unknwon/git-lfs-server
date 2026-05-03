@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"encoding/base64"
+	"encoding/hex"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -43,7 +45,7 @@ func newTestS3PresignBackend(t *testing.T) (*S3PresignBackend, *httptest.Server)
 		o.BaseEndpoint = aws.String(srv.URL)
 		o.UsePathStyle = true
 	})
-	return newS3PresignBackendWithClient(client, testS3Scheme, testBucket), srv
+	return newS3PresignBackendWithClient(client, "test", testS3Scheme, testBucket), srv
 }
 
 func TestS3PresignBackend_URI(t *testing.T) {
@@ -61,17 +63,20 @@ func TestS3PresignBackend_PresignPut(t *testing.T) {
 	url, headers, err := b.PresignPut(t.Context(), oid, size)
 	require.NoError(t, err)
 
-	assert.Equal(t, oid, headers["x-amz-content-sha256"], "OID must be the signed payload hash")
+	rawOID, err := hex.DecodeString(oid)
+	require.NoError(t, err)
+	expectedChecksum := base64.StdEncoding.EncodeToString(rawOID)
+	assert.Equal(t, expectedChecksum, headers["x-amz-checksum-sha256"], "OID must be pinned via x-amz-checksum-sha256")
 	assert.Equal(t, "16", headers["Content-Length"])
 
 	t.Run("URL host matches configured endpoint", func(t *testing.T) {
 		assertURLHasEndpointHost(t, url, srv.URL)
 	})
 
-	t.Run("URL signs x-amz-content-sha256", func(t *testing.T) {
+	t.Run("URL signs x-amz-checksum-sha256", func(t *testing.T) {
 		signed := signedHeadersOf(t, url)
-		assert.Contains(t, signed, "x-amz-content-sha256",
-			"x-amz-content-sha256 must be in X-Amz-SignedHeaders so R2 enforces it")
+		assert.Contains(t, signed, "x-amz-checksum-sha256",
+			"x-amz-checksum-sha256 must be in X-Amz-SignedHeaders so R2 enforces it")
 	})
 
 	t.Run("client PUT to presigned URL stores the bytes", func(t *testing.T) {
@@ -205,7 +210,7 @@ func TestNewS3PresignBackend(t *testing.T) {
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
-				_, err := NewS3PresignBackend(testS3Scheme, tc.bucket, tc.accessKey, tc.secretKey, tc.endpoint)
+				_, err := NewS3PresignBackend("test", testS3Scheme, tc.bucket, tc.accessKey, tc.secretKey, tc.endpoint)
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tc.missingField)
 			})

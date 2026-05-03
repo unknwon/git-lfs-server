@@ -13,7 +13,8 @@ import (
 type Type string
 
 const (
-	TypeGitHub Type = "github"
+	TypeGitHub   Type = "github"
+	TypeSkipAuth Type = "skip-auth"
 )
 
 // Permission is the access level a token has been verified to hold against a
@@ -39,6 +40,9 @@ type Config struct {
 
 // Provider authorizes a token against a repository on a specific forge host.
 type Provider interface {
+	// Type identifies the forge implementation, matching the TYPE key in the
+	// [forge "{host}"] config section.
+	Type() Type
 	Authorize(ctx context.Context, logger *logx.Logger, repo, token string) (Permission, error)
 }
 
@@ -50,6 +54,8 @@ var ErrTokenInvalid = errors.New("forge: token is invalid or lacks repository ac
 // always return PermissionWrite without contacting the underlying forge.
 // Used only when [forge "{host}"] sets SKIP_AUTH = true.
 type SkipAuthProvider struct{}
+
+func (SkipAuthProvider) Type() Type { return TypeSkipAuth }
 
 func (SkipAuthProvider) Authorize(ctx context.Context, logger *logx.Logger, repo, token string) (Permission, error) {
 	return PermissionWrite, nil

@@ -83,13 +83,14 @@ func loadConfig(customPath string) (*Config, error) {
 		t := storage.Type(s.Key("TYPE").String())
 		switch t {
 		case storage.TypeFilesystem:
-			b, err := storage.NewFilesystemBackend(scheme, s.Key("ROOT").String(), s.Key("TEMP_DIR").String())
+			b, err := storage.NewFilesystemBackend(name, scheme, s.Key("ROOT").String(), s.Key("TEMP_DIR").String())
 			if err != nil {
 				return nil, errors.Wrapf(err, "init storage %q", name)
 			}
 			backendsByName[name] = b
 		case storage.TypeS3Presign:
 			b, err := storage.NewS3PresignBackend(
+				name,
 				scheme,
 				s.Key("BUCKET").String(),
 				s.Key("ACCESS_KEY_ID").String(),
@@ -108,7 +109,7 @@ func loadConfig(customPath string) (*Config, error) {
 	}
 
 	c.Forges = make(map[string]forge.Provider)
-	c.Storages = make(map[string]any)
+	c.Storages = make(map[string]storage.Backend)
 	for _, s := range f.Sections() {
 		rest, ok := strings.CutPrefix(s.Name(), forgeSectionPrefix)
 		if !ok {

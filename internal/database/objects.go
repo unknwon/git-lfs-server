@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/lib/pq"
 	"gorm.io/gorm"
 
 	"unknwon.dev/git-lfs-server/internal/ptrx"
@@ -202,8 +203,8 @@ func (d *DB) GetObjectsByOIDs(ctx context.Context, oids []string) (map[string]Ob
 	var rows []Object
 	err := d.db.WithContext(ctx).Raw(`
 SELECT * FROM objects
-WHERE oid IN (@oids) AND verified_at IS NOT NULL`,
-		map[string]any{"oids": oids},
+WHERE oid = ANY(@oids) AND verified_at IS NOT NULL`,
+		map[string]any{"oids": pq.Array(oids)},
 	).Scan(&rows).Error
 	if err != nil {
 		return nil, errors.Wrap(err, "select objects by OIDs")
@@ -229,9 +230,9 @@ FROM objects
 JOIN repo_objects ON repo_objects.object_id = objects.id
 WHERE
 	repo_objects.repo_name = @repoName
-AND objects.oid IN (@oids)
+AND objects.oid = ANY(@oids)
 AND objects.verified_at IS NOT NULL`,
-		map[string]any{"repoName": repoName, "oids": oids},
+		map[string]any{"repoName": repoName, "oids": pq.Array(oids)},
 	).Scan(&rows).Error
 	if err != nil {
 		return nil, errors.Wrap(err, "select repo objects by OIDs")

@@ -18,6 +18,8 @@ type GitHubProvider struct {
 	client *http.Client
 }
 
+func (*GitHubProvider) Type() Type { return TypeGitHub }
+
 func NewGitHubProvider(host string) *GitHubProvider {
 	return &GitHubProvider{
 		host:   host,

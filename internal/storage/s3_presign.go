@@ -2,6 +2,8 @@ package storage
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/hex"
 	"net/url"
 	"strconv"
 	"strings"
@@ -12,8 +14,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
-	"github.com/aws/smithy-go/middleware"
-	smithyhttp "github.com/aws/smithy-go/transport/http"
 	"github.com/cockroachdb/errors"
 )
 
@@ -27,17 +27,22 @@ const presignURLTTL = 60 * time.Second
 var _ Presigner = (*S3PresignBackend)(nil)
 
 type S3PresignBackend struct {
+	name          string
 	scheme        string
 	bucket        string
 	client        *s3.Client
 	presignClient *s3.PresignClient
 }
 
+func (b *S3PresignBackend) Name() string { return b.name }
+
+func (*S3PresignBackend) Type() Type { return TypeS3Presign }
+
 // NewS3PresignBackend constructs a Presigner backed by an S3-compatible
 // service (e.g. Cloudflare R2, AWS S3). Credentials are supplied directly to
 // avoid implicit AWS_* env / ~/.aws/config lookups. The scheme is the URI
 // prefix used to form canonical object locations and must end with "://".
-func NewS3PresignBackend(scheme, bucket, accessKeyID, secretAccessKey, endpoint string) (*S3PresignBackend, error) {
+func NewS3PresignBackend(name, scheme, bucket, accessKeyID, secretAccessKey, endpoint string) (*S3PresignBackend, error) {
 	if bucket == "" {
 		return nil, errors.New("BUCKET is required")
 	}
@@ -62,11 +67,12 @@ func NewS3PresignBackend(scheme, bucket, accessKeyID, secretAccessKey, endpoint 
 		o.BaseEndpoint = aws.String(endpoint)
 		o.UsePathStyle = true
 	})
-	return newS3PresignBackendWithClient(client, scheme, bucket), nil
+	return newS3PresignBackendWithClient(client, name, scheme, bucket), nil
 }
 
-func newS3PresignBackendWithClient(client *s3.Client, scheme, bucket string) *S3PresignBackend {
+func newS3PresignBackendWithClient(client *s3.Client, name, scheme, bucket string) *S3PresignBackend {
 	return &S3PresignBackend{
+		name:          name,
 		scheme:        scheme,
 		bucket:        bucket,
 		client:        client,
@@ -80,20 +86,36 @@ func (b *S3PresignBackend) URI(oid string) string {
 	return b.scheme + b.bucket + "/" + oid
 }
 
-// PresignPut returns a presigned PUT URL with x-amz-content-sha256 = oid
-// signed into the canonical request, so the backend server-side validates
-// that the uploaded body's actual SHA-256 matches the OID and rejects
-// mismatches with HTTP 400 BadDigest. Content-Length is also included so the
-// size is signed.
+// PresignPut returns a presigned PUT URL that pins the body's SHA-256 to oid
+// via x-amz-checksum-sha256, so the backend server-side validates the upload
+// and rejects mismatches with HTTP 400 BadDigest. Content-Length is also
+// included so the size is signed.
+//
+// Note: x-amz-content-sha256 cannot be used here. AWS sigv4 mandates
+// UNSIGNED-PAYLOAD as the canonical-request HashedPayload for query-string
+// presigned URLs (S3 sigv4-query-string-auth spec), so signing the body hash
+// into x-amz-content-sha256 produces a signature that R2 rejects.
 func (b *S3PresignBackend) PresignPut(ctx context.Context, oid string, size int64) (string, map[string]string, error) {
+	rawOID, err := hex.DecodeString(oid)
+	if err != nil {
+		return "", nil, errors.Wrapf(err, "decode oid %q", oid)
+	}
+	checksumB64 := base64.StdEncoding.EncodeToString(rawOID)
+
 	req, err := b.presignClient.PresignPutObject(ctx, &s3.PutObjectInput{
-		Bucket:        aws.String(b.bucket),
-		Key:           aws.String(oid),
-		ContentLength: aws.Int64(size),
+		Bucket:         aws.String(b.bucket),
+		Key:            aws.String(oid),
+		ContentLength:  aws.Int64(size),
+		ChecksumSHA256: aws.String(checksumB64),
 	}, func(o *s3.PresignOptions) {
 		o.Expires = presignURLTTL
-		o.ClientOptions = append(o.ClientOptions, func(co *s3.Options) {
-			co.APIOptions = append(co.APIOptions, injectPayloadHashAPIOption(oid))
+		// DisableHeaderHoisting keeps x-amz-checksum-sha256 as a signed
+		// header instead of hoisting it to a query parameter, which is
+		// what makes S3/R2 enforce the checksum on PUT.
+		// https://github.com/aws/aws-sdk-go-v2/issues/2610
+		o.Presigner = v4.NewSigner(func(so *v4.SignerOptions) {
+			so.DisableURIPathEscaping = true
+			so.DisableHeaderHoisting = true
 		})
 	})
 	if err != nil {
@@ -101,8 +123,8 @@ func (b *S3PresignBackend) PresignPut(ctx context.Context, oid string, size int6
 	}
 
 	headers := map[string]string{
-		"x-amz-content-sha256": oid,
-		"Content-Length":       strconv.FormatInt(size, 10),
+		"x-amz-checksum-sha256": checksumB64,
+		"Content-Length":        strconv.FormatInt(size, 10),
 	}
 	return req.URL, headers, nil
 }
@@ -182,32 +204,4 @@ func (b *S3PresignBackend) keyFromURI(uri string) (string, error) {
 		return "", errors.Newf("uri %q references bucket %q but backend is configured for %q", uri, bucket, b.bucket)
 	}
 	return key, nil
-}
-
-// injectPayloadHashAPIOption returns an APIOption that inserts a finalize
-// middleware which both seeds the precomputed payload hash on the context
-// and sets the x-amz-content-sha256 header on the request. The SDK's
-// ComputePayloadSHA256 middleware is a no-op when the hash is already set,
-// and the v4 signer reads x-amz-content-sha256 from req.Header to decide
-// what to include in X-Amz-SignedHeaders. The presigner returns the URL
-// covering both, so the backend server-side hashes the body and rejects
-// mismatches with HTTP 400 BadDigest.
-func injectPayloadHashAPIOption(hash string) func(*middleware.Stack) error {
-	return func(stack *middleware.Stack) error {
-		return stack.Finalize.Add(
-			middleware.FinalizeMiddlewareFunc(
-				"InjectPayloadHash",
-				func(ctx context.Context, in middleware.FinalizeInput, next middleware.FinalizeHandler) (middleware.FinalizeOutput, middleware.Metadata, error) {
-					ctx = v4.SetPayloadHash(ctx, hash)
-					if req, ok := in.Request.(*smithyhttp.Request); ok {
-						req.Header.Set("X-Amz-Content-Sha256", hash)
-					} else {
-						return middleware.FinalizeOutput{}, middleware.Metadata{}, errors.Newf("unexpected request type %T", in.Request)
-					}
-					return next.HandleFinalize(ctx, in)
-				},
-			),
-			middleware.Before,
-		)
-	}
 }

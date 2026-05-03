@@ -9,8 +9,16 @@ import (
 
 var ErrNotFound = errors.New("storage: object not found")
 
-// Backend is a storage backend. It must be either a Proxier or Presigner.
-type Backend = any
+// Backend is a storage backend. Implementations must also satisfy either
+// Proxier or Presigner.
+type Backend interface {
+	// Name is the configured name from the [storage "{name}"] section,
+	// used in logs to identify which backend handled a request.
+	Name() string
+	// Type identifies the storage implementation, matching the TYPE key in the
+	// [storage "{name}"] config section.
+	Type() Type
+}
 
 // Type identifies a storage backend implementation. The value matches the
 // TYPE key inside a [storage "{name}"] section.
@@ -25,6 +33,8 @@ const (
 // integrity server-side. The lfsd server itself reads the body, hashes it
 // via iox.SHA256Reader, and writes the bytes to the backend.
 type Proxier interface {
+	Backend
+
 	// Put stores the bytes from r under the given oid and returns a URI that
 	// uniquely identifies the stored object, including the backend scheme.
 	Put(ctx context.Context, oid string, r io.Reader) (uri string, err error)
@@ -40,6 +50,8 @@ type Proxier interface {
 // transfers bytes directly to/from the backend. The lfsd server only sees
 // JSON exchanges (batch, verify), never the object bytes.
 type Presigner interface {
+	Backend
+
 	// URI returns the canonical, non-expiring location of the object. Pure
 	// function of the OID and the backend's static config (e.g. bucket name);
 	// safe to compute without I/O.
