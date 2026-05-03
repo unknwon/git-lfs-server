@@ -26,8 +26,8 @@ func TestGitHubTokenTTL(t *testing.T) {
 		assert.Equal(t, time.Duration(0), githubTokenTTL(ctx, logger, ""))
 	})
 
-	t.Run("header malformed returns zero", func(t *testing.T) {
-		assert.Equal(t, time.Duration(0), githubTokenTTL(ctx, logger, "not a date"))
+	t.Run("header malformed returns negative to fail closed", func(t *testing.T) {
+		assert.Negative(t, githubTokenTTL(ctx, logger, "not a date"))
 	})
 
 	t.Run("classic PAT UTC header far in the future returns large positive duration", func(t *testing.T) {

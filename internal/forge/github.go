@@ -16,6 +16,7 @@ var _ Provider = (*GitHubProvider)(nil)
 
 type GitHubProvider struct {
 	host      string
+	apiBase   string
 	client    *http.Client
 	allowlist *RepoAllowlist
 }
@@ -27,9 +28,20 @@ func (p *GitHubProvider) Allow(repo string) bool { return p.allowlist.Allow(repo
 func NewGitHubProvider(host string, allowlist *RepoAllowlist) *GitHubProvider {
 	return &GitHubProvider{
 		host:      host,
+		apiBase:   githubAPIBase(host),
 		client:    &http.Client{Timeout: 30 * time.Second},
 		allowlist: allowlist,
 	}
+}
+
+// githubAPIBase resolves the REST API root for a forge host. github.com is
+// served from a dedicated subdomain; GitHub Enterprise Server exposes the same
+// API under "/api/v3" on the appliance host.
+func githubAPIBase(host string) string {
+	if host == "github.com" {
+		return "https://api.github.com"
+	}
+	return "https://" + host + "/api/v3"
 }
 
 type githubRepoResponse struct {
@@ -53,7 +65,7 @@ var githubExpirationLayouts = []string{
 }
 
 func (p *GitHubProvider) Authorize(ctx context.Context, logger *logx.Logger, repo, token string) (Permission, time.Duration, error) {
-	url := "https://api.github.com/repos/" + repo
+	url := p.apiBase + "/repos/" + repo
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", 0, errors.Wrap(err, "create request")
@@ -98,10 +110,16 @@ func (p *GitHubProvider) Authorize(ctx context.Context, logger *logx.Logger, rep
 }
 
 // githubTokenTTL returns the raw time until the token expires based on the
-// GitHub-Authentication-Token-Expiration response header. A zero return means
-// the header was absent or unparseable; the caller should treat this as "no
-// expiry signal". The caller is responsible for applying any safety margin,
-// maximum cap, or default TTL before caching.
+// GitHub-Authentication-Token-Expiration response header. The return value
+// follows the forge.Provider contract:
+//   - Zero: the header was absent (classic PATs and OAuth tokens do not emit
+//     it); the caller may apply a conservative default TTL.
+//   - Negative: the header was present but could not be parsed against any
+//     known layout. This signals an undocumented format change on GitHub's
+//     side, so the caller must fail closed and skip caching rather than fall
+//     back to a default TTL on an expiry signal we no longer trust.
+//   - Positive: the time until the parsed expiry; the caller applies any
+//     safety margin and maximum cap before caching.
 func githubTokenTTL(ctx context.Context, logger *logx.Logger, header string) time.Duration {
 	if header == "" {
 		return 0
@@ -117,7 +135,7 @@ func githubTokenTTL(ctx context.Context, logger *logx.Logger, header string) tim
 	if parseErr != nil {
 		logger.WarnContext(ctx, "Failed to parse GitHub token expiration header",
 			"header", githubExpirationHeader, "value", header, "error", parseErr)
-		return 0
+		return -1
 	}
 	return time.Until(expiry)
 }

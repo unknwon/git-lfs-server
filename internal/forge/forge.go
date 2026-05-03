@@ -50,7 +50,9 @@ type Config struct {
 //
 // The duration returned by Authorize describes when the token expires relative
 // to now:
-//   - Negative: the provider explicitly opts out of caching (e.g., skip-auth).
+//   - Negative: caching is not safe for this decision. Either the provider
+//     explicitly opts out (e.g., skip-auth) or it received an expiry signal it
+//     could not interpret and is failing closed.
 //   - Zero: the provider has no expiry signal; the caller may apply a
 //     conservative default TTL.
 //   - Positive: the raw time until the token expires; the caller should apply
