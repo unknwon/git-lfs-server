@@ -118,15 +118,12 @@ func githubCacheTTL(ctx context.Context, logger *logx.Logger, header string) tim
 	var expiry time.Time
 	var parseErr error
 	for _, layout := range githubExpirationLayouts {
-		t, err := time.Parse(layout, header)
-		if err == nil {
-			expiry = t
-			parseErr = nil
+		expiry, parseErr = time.Parse(layout, header)
+		if parseErr == nil {
 			break
 		}
-		parseErr = err
 	}
-	if expiry.IsZero() {
+	if parseErr != nil {
 		logger.WarnContext(ctx, "Failed to parse GitHub token expiration header, falling back to default TTL",
 			"header", githubExpirationHeader, "value", header, "error", parseErr)
 		return githubDefaultTTL

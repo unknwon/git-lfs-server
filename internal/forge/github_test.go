@@ -14,13 +14,9 @@ func TestGitHubCacheTTL(t *testing.T) {
 	ctx := context.Background()
 	logger := logx.NewNoopLogger()
 
-	// Format the given time using the layout GitHub uses for the named token
-	// type, matching empirically observed behavior:
+	// Wire formats GitHub uses, matching empirically observed behavior:
 	//   - classic PATs: "2006-01-02 15:04:05 UTC"
 	//   - fine-grained PATs / GitHub App user tokens: "2006-01-02 15:04:05 -0700"
-	formatExpiry := func(t time.Time, layout string) string {
-		return t.Format(layout)
-	}
 	const (
 		layoutClassic     = "2006-01-02 15:04:05 UTC"
 		layoutFineGrained = "2006-01-02 15:04:05 -0700"
@@ -35,15 +31,13 @@ func TestGitHubCacheTTL(t *testing.T) {
 	})
 
 	t.Run("classic PAT UTC header far in the future is clamped to max TTL", func(t *testing.T) {
-		expiry := formatExpiry(time.Now().UTC().Add(8*time.Hour), layoutClassic)
+		expiry := time.Now().UTC().Add(8 * time.Hour).Format(layoutClassic)
 		assert.Equal(t, githubMaxTTL, githubCacheTTL(ctx, logger, expiry))
 	})
 
 	t.Run("classic PAT UTC header 30 minutes out returns expiry minus margin", func(t *testing.T) {
-		expiry := formatExpiry(time.Now().UTC().Add(30*time.Minute), layoutClassic)
+		expiry := time.Now().UTC().Add(30 * time.Minute).Format(layoutClassic)
 		ttl := githubCacheTTL(ctx, logger, expiry)
-		// Allow a 2-second window for test scheduling jitter and the 1-second
-		// truncation inherent to the wire format.
 		want := 30*time.Minute - githubMargin
 		assert.InDelta(t, want, ttl, float64(2*time.Second))
 	})
@@ -53,19 +47,19 @@ func TestGitHubCacheTTL(t *testing.T) {
 		// form "2025-09-10 02:30:13 +0200". Format using a +0200 zone so the
 		// wall-clock differs from UTC, proving we don't naively assume UTC.
 		berlin := time.FixedZone("test", 2*60*60)
-		expiry := formatExpiry(time.Now().Add(30*time.Minute).In(berlin), layoutFineGrained)
+		expiry := time.Now().Add(30 * time.Minute).In(berlin).Format(layoutFineGrained)
 		ttl := githubCacheTTL(ctx, logger, expiry)
 		want := 30*time.Minute - githubMargin
 		assert.InDelta(t, want, ttl, float64(2*time.Second))
 	})
 
 	t.Run("classic PAT UTC header at or before now disables caching", func(t *testing.T) {
-		expiry := formatExpiry(time.Now().UTC().Add(-1*time.Minute), layoutClassic)
+		expiry := time.Now().UTC().Add(-1 * time.Minute).Format(layoutClassic)
 		assert.Equal(t, time.Duration(-1), githubCacheTTL(ctx, logger, expiry))
 	})
 
 	t.Run("classic PAT UTC header within margin disables caching", func(t *testing.T) {
-		expiry := formatExpiry(time.Now().UTC().Add(githubMargin/2), layoutClassic)
+		expiry := time.Now().UTC().Add(githubMargin / 2).Format(layoutClassic)
 		assert.Equal(t, time.Duration(-1), githubCacheTTL(ctx, logger, expiry))
 	})
 }
