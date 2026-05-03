@@ -86,10 +86,11 @@ func NewRepoAllowlist(entries []string) (*RepoAllowlist, error) {
 		if entry == "" {
 			continue
 		}
-		if err := validateAllowlistEntry(entry); err != nil {
+		prefix, isPrefix, err := parseAllowlistEntry(entry)
+		if err != nil {
 			return nil, errors.Wrapf(err, "invalid entry %q", entry)
 		}
-		if prefix, ok := strings.CutSuffix(entry, "/**"); ok {
+		if isPrefix {
 			a.prefixes = append(a.prefixes, prefix+"/")
 			continue
 		}
@@ -118,27 +119,27 @@ func (a *RepoAllowlist) Allow(repo string) bool {
 	return false
 }
 
-func validateAllowlistEntry(entry string) error {
+// parseAllowlistEntry validates a normalized entry and reports whether it
+// is a "<prefix>/**" form. For prefix entries the returned prefix has the
+// trailing "/**" stripped.
+func parseAllowlistEntry(entry string) (prefix string, isPrefix bool, err error) {
 	if entry == "**" {
-		return errors.New(`bare "**" matches everything; leave the key empty instead`)
+		return "", false, errors.New(`bare "**" matches everything; leave the key empty instead`)
 	}
 	if strings.HasPrefix(entry, "/") {
-		return errors.New(`must not start with "/"`)
+		return "", false, errors.New(`must not start with "/"`)
 	}
 	if strings.Contains(entry, "//") {
-		return errors.New(`must not contain "//"`)
+		return "", false, errors.New(`must not contain "//"`)
 	}
-	if prefix, ok := strings.CutSuffix(entry, "/**"); ok {
-		if prefix == "" {
-			return errors.New(`prefix before "/**" must be non-empty`)
+	if p, ok := strings.CutSuffix(entry, "/**"); ok {
+		if strings.Contains(p, "*") {
+			return "", false, errors.New(`"*" is only allowed as the final "/**" segment`)
 		}
-		if strings.Contains(prefix, "*") {
-			return errors.New(`"*" is only allowed as the final "/**" segment`)
-		}
-		return nil
+		return p, true, nil
 	}
 	if strings.Contains(entry, "*") {
-		return errors.New(`"*" is only allowed as the final "/**" segment`)
+		return "", false, errors.New(`"*" is only allowed as the final "/**" segment`)
 	}
-	return nil
+	return "", false, nil
 }

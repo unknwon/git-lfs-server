@@ -132,15 +132,15 @@ func loadConfig(customPath string) (*Config, error) {
 		if fc.Storage == "" {
 			return nil, errors.Newf("forge %q is missing required key %q", host, "STORAGE")
 		}
+		backend, ok := backendsByName[fc.Storage]
+		if !ok {
+			return nil, errors.Newf("forge %q references unconfigured storage %q", host, fc.Storage)
+		}
 		allow, err := forge.NewRepoAllowlist(fc.RepoAllowlist)
 		if err != nil {
 			return nil, errors.Wrapf(err, "forge %q REPO_ALLOWLIST", host)
 		}
 		c.Allowlist[host] = allow
-		backend, ok := backendsByName[fc.Storage]
-		if !ok {
-			return nil, errors.Newf("forge %q references unconfigured storage %q", host, fc.Storage)
-		}
 		if fc.SkipAuth {
 			c.Forges[host] = forge.SkipAuthProvider{}
 		} else {
