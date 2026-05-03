@@ -10,7 +10,7 @@ import (
 	"unknwon.dev/git-lfs-server/internal/logx"
 )
 
-func TestGitHubCacheTTL(t *testing.T) {
+func TestGitHubTokenTTL(t *testing.T) {
 	ctx := context.Background()
 	logger := logx.NewNoopLogger()
 
@@ -22,24 +22,24 @@ func TestGitHubCacheTTL(t *testing.T) {
 		layoutFineGrained = "2006-01-02 15:04:05 -0700"
 	)
 
-	t.Run("header absent returns default TTL", func(t *testing.T) {
-		assert.Equal(t, githubDefaultTTL, githubCacheTTL(ctx, logger, ""))
+	t.Run("header absent returns zero", func(t *testing.T) {
+		assert.Equal(t, time.Duration(0), githubTokenTTL(ctx, logger, ""))
 	})
 
-	t.Run("header malformed returns default TTL", func(t *testing.T) {
-		assert.Equal(t, githubDefaultTTL, githubCacheTTL(ctx, logger, "not a date"))
+	t.Run("header malformed returns zero", func(t *testing.T) {
+		assert.Equal(t, time.Duration(0), githubTokenTTL(ctx, logger, "not a date"))
 	})
 
-	t.Run("classic PAT UTC header far in the future is clamped to max TTL", func(t *testing.T) {
+	t.Run("classic PAT UTC header far in the future returns large positive duration", func(t *testing.T) {
 		expiry := time.Now().UTC().Add(8 * time.Hour).Format(layoutClassic)
-		assert.Equal(t, githubMaxTTL, githubCacheTTL(ctx, logger, expiry))
+		ttl := githubTokenTTL(ctx, logger, expiry)
+		assert.InDelta(t, (8 * time.Hour).Seconds(), ttl.Seconds(), 2)
 	})
 
-	t.Run("classic PAT UTC header 30 minutes out returns expiry minus margin", func(t *testing.T) {
+	t.Run("classic PAT UTC header 30 minutes out returns ~30 minutes", func(t *testing.T) {
 		expiry := time.Now().UTC().Add(30 * time.Minute).Format(layoutClassic)
-		ttl := githubCacheTTL(ctx, logger, expiry)
-		want := 30*time.Minute - githubMargin
-		assert.InDelta(t, want, ttl, float64(2*time.Second))
+		ttl := githubTokenTTL(ctx, logger, expiry)
+		assert.InDelta(t, (30 * time.Minute).Seconds(), ttl.Seconds(), 2)
 	})
 
 	t.Run("fine-grained PAT offset header in non-UTC zone parses correctly", func(t *testing.T) {
@@ -48,18 +48,12 @@ func TestGitHubCacheTTL(t *testing.T) {
 		// wall-clock differs from UTC, proving we don't naively assume UTC.
 		berlin := time.FixedZone("test", 2*60*60)
 		expiry := time.Now().Add(30 * time.Minute).In(berlin).Format(layoutFineGrained)
-		ttl := githubCacheTTL(ctx, logger, expiry)
-		want := 30*time.Minute - githubMargin
-		assert.InDelta(t, want, ttl, float64(2*time.Second))
+		ttl := githubTokenTTL(ctx, logger, expiry)
+		assert.InDelta(t, (30 * time.Minute).Seconds(), ttl.Seconds(), 2)
 	})
 
-	t.Run("classic PAT UTC header at or before now disables caching", func(t *testing.T) {
+	t.Run("classic PAT UTC header in the past returns negative duration", func(t *testing.T) {
 		expiry := time.Now().UTC().Add(-1 * time.Minute).Format(layoutClassic)
-		assert.Equal(t, time.Duration(-1), githubCacheTTL(ctx, logger, expiry))
-	})
-
-	t.Run("classic PAT UTC header within margin disables caching", func(t *testing.T) {
-		expiry := time.Now().UTC().Add(githubMargin / 2).Format(layoutClassic)
-		assert.Equal(t, time.Duration(-1), githubCacheTTL(ctx, logger, expiry))
+		assert.Negative(t, githubTokenTTL(ctx, logger, expiry))
 	})
 }

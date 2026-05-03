@@ -48,10 +48,13 @@ type Config struct {
 
 // Provider authorizes a token against a repository on a specific forge host.
 //
-// The returned duration is the cache TTL the provider considers safe for the
-// permission decision. A negative value signals the caller MUST NOT cache the
-// result (e.g., the token is about to expire, or the provider has no expiry
-// signal it can stand behind).
+// The duration returned by Authorize describes when the token expires relative
+// to now:
+//   - Negative: the provider explicitly opts out of caching (e.g., skip-auth).
+//   - Zero: the provider has no expiry signal; the caller may apply a
+//     conservative default TTL.
+//   - Positive: the raw time until the token expires; the caller should apply
+//     a safety margin and a maximum cap before caching.
 type Provider interface {
 	// Type identifies the forge implementation, matching the TYPE key in the
 	// [forge "{host}"] config section.

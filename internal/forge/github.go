@@ -39,28 +39,14 @@ type githubRepoResponse struct {
 	} `json:"permissions"`
 }
 
-// Cache TTL policy for permission decisions returned from the GitHub API.
-//
-// GitHub returns the github-authentication-token-expiration response header for
-// fine-grained PATs and GitHub App user tokens. When present, we cache the
-// decision until margin before the token expires (so the cache never serves a
-// decision tied to an already-invalid token). When absent — classic PATs and
-// OAuth tokens — we fall back to defaultTTL. maxTTL caps both paths so a
-// long-lived token never sits in the cache for an unbounded window.
-const (
-	githubDefaultTTL = 5 * time.Minute
-	githubMaxTTL     = 1 * time.Hour
-	githubMargin     = 5 * time.Minute
-)
-
-const githubExpirationHeader = "github-authentication-token-expiration"
-
 // Wire formats observed for the github-authentication-token-expiration header.
 // Classic PATs emit the zone-abbreviation form (e.g. "2024-04-27 20:14:21 UTC");
 // fine-grained PATs and GitHub App user tokens emit the numeric-offset form
 // reflecting the token owner's timezone (e.g. "2025-09-10 02:30:13 +0200").
 // GitHub does not document the format, so we mirror the dual-layout strategy
 // used by google/go-github (issue #2649).
+const githubExpirationHeader = "github-authentication-token-expiration"
+
 var githubExpirationLayouts = []string{
 	"2006-01-02 15:04:05 MST",
 	"2006-01-02 15:04:05 -0700",
@@ -108,12 +94,17 @@ func (p *GitHubProvider) Authorize(ctx context.Context, logger *logx.Logger, rep
 	default:
 		return "", 0, errors.WithStack(ErrTokenInvalid)
 	}
-	return perm, githubCacheTTL(ctx, logger, resp.Header.Get(githubExpirationHeader)), nil
+	return perm, githubTokenTTL(ctx, logger, resp.Header.Get(githubExpirationHeader)), nil
 }
 
-func githubCacheTTL(ctx context.Context, logger *logx.Logger, header string) time.Duration {
+// githubTokenTTL returns the raw time until the token expires based on the
+// GitHub-Authentication-Token-Expiration response header. A zero return means
+// the header was absent or unparseable; the caller should treat this as "no
+// expiry signal". The caller is responsible for applying any safety margin,
+// maximum cap, or default TTL before caching.
+func githubTokenTTL(ctx context.Context, logger *logx.Logger, header string) time.Duration {
 	if header == "" {
-		return githubDefaultTTL
+		return 0
 	}
 	var expiry time.Time
 	var parseErr error
@@ -124,16 +115,9 @@ func githubCacheTTL(ctx context.Context, logger *logx.Logger, header string) tim
 		}
 	}
 	if parseErr != nil {
-		logger.WarnContext(ctx, "Failed to parse GitHub token expiration header, falling back to default TTL",
+		logger.WarnContext(ctx, "Failed to parse GitHub token expiration header",
 			"header", githubExpirationHeader, "value", header, "error", parseErr)
-		return githubDefaultTTL
+		return 0
 	}
-	ttl := time.Until(expiry) - githubMargin
-	if ttl <= 0 {
-		return -1
-	}
-	if ttl > githubMaxTTL {
-		return githubMaxTTL
-	}
-	return ttl
+	return time.Until(expiry)
 }

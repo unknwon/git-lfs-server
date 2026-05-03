@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/flamego/cache"
@@ -121,7 +122,7 @@ func serveHealthz(db *database.DB) flamego.Handler {
 }
 
 func authorize(forges map[string]forge.Provider) flamego.Handler {
-	return func(c flamego.Context, logger *logx.Logger, store cache.Cache) {
+	return func(c flamego.Context, logger *logx.Logger, cache cache.Cache) {
 		logger = logger.Scoped("authorize")
 		ctx := c.Request().Context()
 
@@ -152,17 +153,17 @@ func authorize(forges map[string]forge.Provider) flamego.Handler {
 		}
 
 		key := authCacheKey(host, repo, token)
-		if v, err := store.Get(ctx, key); err == nil {
+		if v, err := cache.Get(ctx, key); err == nil {
 			if perm, ok := v.(forge.Permission); ok {
 				c.Map(perm)
 				return
 			}
 			logger.DebugContext(ctx, "Discarding auth cache entry of unexpected type")
 		} else if !errors.Is(err, os.ErrNotExist) {
-			logger.DebugContext(ctx, "Auth cache lookup failed", "error", err)
+			logger.WarnContext(ctx, "Auth cache lookup failed", "error", err)
 		}
 
-		perm, ttl, err := provider.Authorize(ctx, logger.Scoped("forge"), repo, token)
+		perm, rawTTL, err := provider.Authorize(ctx, logger.Scoped("forge"), repo, token)
 		if err != nil {
 			if errors.Is(err, forge.ErrTokenInvalid) {
 				http.Error(c.ResponseWriter(), "token is invalid or lacks repository access", http.StatusForbidden)
@@ -173,12 +174,12 @@ func authorize(forges map[string]forge.Provider) flamego.Handler {
 			return
 		}
 
-		if ttl >= 0 {
+		if ttl := authCacheTTL(rawTTL); ttl >= 0 {
 			// Decouple the cache write from the request context so a client
 			// disconnect between the upstream call and the Set doesn't drop
 			// the entry on backends that honor cancellation.
 			setCtx := context.WithoutCancel(ctx)
-			if err := store.Set(setCtx, key, perm, ttl); err != nil {
+			if err := cache.Set(setCtx, key, perm, ttl); err != nil {
 				logger.WarnContext(ctx, "Failed to cache authorization result", "error", err)
 			}
 		}
@@ -192,4 +193,39 @@ func authorize(forges map[string]forge.Provider) flamego.Handler {
 func authCacheKey(host, repo, token string) string {
 	sum := sha256.Sum256([]byte(host + ":" + repo + ":" + token))
 	return hex.EncodeToString(sum[:])
+}
+
+// Cache TTL policy for permission decisions. The forge provider returns the raw
+// time until the token expires (zero if unknown); this function applies the
+// default TTL, safety margin, and maximum cap so the cached entry is always
+// invalidated before the underlying token becomes stale.
+const (
+	authCacheTTLDefault = 5 * time.Minute
+	authCacheTTLMax     = 1 * time.Hour
+	authCacheTTLMargin  = 5 * time.Minute
+)
+
+// authCacheTTL converts a provider-reported raw token TTL into an effective
+// cache TTL. A negative rawTTL means the provider explicitly opts out of
+// caching; the returned value is also negative in that case. A zero rawTTL
+// means the provider has no expiry signal and authCacheTTLDefault is used. A
+// positive rawTTL has authCacheTTLMargin subtracted and is capped at
+// authCacheTTLMax; if the result is non-positive caching is also skipped.
+func authCacheTTL(rawTTL time.Duration) time.Duration {
+	if rawTTL < 0 {
+		return -1
+	}
+	var ttl time.Duration
+	if rawTTL == 0 {
+		ttl = authCacheTTLDefault
+	} else {
+		ttl = rawTTL - authCacheTTLMargin
+	}
+	if ttl <= 0 {
+		return -1
+	}
+	if ttl > authCacheTTLMax {
+		return authCacheTTLMax
+	}
+	return ttl
 }
