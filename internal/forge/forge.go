@@ -50,6 +50,10 @@ type Provider interface {
 	// Type identifies the forge implementation, matching the TYPE key in the
 	// [forge "{host}"] config section.
 	Type() Type
+	// Allow reports whether repo (already lowercased, full path after host)
+	// is permitted by the forge's REPO_ALLOWLIST. An empty allowlist
+	// permits every repo.
+	Allow(repo string) bool
 	Authorize(ctx context.Context, logger *logx.Logger, repo, token string) (Permission, error)
 }
 
@@ -57,14 +61,22 @@ type Provider interface {
 // required repository access.
 var ErrTokenInvalid = errors.New("forge: token is invalid or lacks repository access")
 
-// SkipAuthProvider wraps another Provider and short-circuits Authorize to
-// always return PermissionWrite without contacting the underlying forge.
-// Used only when [forge "{host}"] sets SKIP_AUTH = true.
-type SkipAuthProvider struct{}
+// SkipAuthProvider short-circuits Authorize to always return PermissionWrite
+// without contacting the underlying forge. Used only when [forge "{host}"]
+// sets SKIP_AUTH = true. The allowlist still applies.
+type SkipAuthProvider struct {
+	allowlist *RepoAllowlist
+}
 
-func (SkipAuthProvider) Type() Type { return TypeSkipAuth }
+func NewSkipAuthProvider(allowlist *RepoAllowlist) *SkipAuthProvider {
+	return &SkipAuthProvider{allowlist: allowlist}
+}
 
-func (SkipAuthProvider) Authorize(ctx context.Context, logger *logx.Logger, repo, token string) (Permission, error) {
+func (*SkipAuthProvider) Type() Type { return TypeSkipAuth }
+
+func (p *SkipAuthProvider) Allow(repo string) bool { return p.allowlist.Allow(repo) }
+
+func (*SkipAuthProvider) Authorize(ctx context.Context, logger *logx.Logger, repo, token string) (Permission, error) {
 	return PermissionWrite, nil
 }
 

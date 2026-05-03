@@ -62,7 +62,7 @@ func main() {
 		f.Get("/{oid}", serveDownload(db, config.Storages))
 		f.Put("/{oid}", serveUpload(db, config.Storages, config.Server.MaxObjectSize))
 		f.Post("/verify", serveVerify(db, config.Storages))
-	}, authorize(config.Forges, config.Allowlist))
+	}, authorize(config.Forges))
 
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -116,7 +116,7 @@ func serveHealthz(db *database.DB) flamego.Handler {
 	}
 }
 
-func authorize(forges map[string]forge.Provider, allowlist map[string]*forge.RepoAllowlist) flamego.Handler {
+func authorize(forges map[string]forge.Provider) flamego.Handler {
 	return func(c flamego.Context, logger *logx.Logger) {
 		logger = logger.Scoped("authorize")
 		ctx := c.Request().Context()
@@ -141,7 +141,7 @@ func authorize(forges map[string]forge.Provider, allowlist map[string]*forge.Rep
 			return
 		}
 
-		if !allowlist[host].Allow(repo) {
+		if !provider.Allow(repo) {
 			logger.InfoContext(ctx, "Repository rejected by allowlist", "host", host, "repo", repo)
 			http.Error(c.ResponseWriter(), "repository is not in the allowlist", http.StatusForbidden)
 			return

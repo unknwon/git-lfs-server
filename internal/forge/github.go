@@ -14,16 +14,20 @@ import (
 var _ Provider = (*GitHubProvider)(nil)
 
 type GitHubProvider struct {
-	host   string
-	client *http.Client
+	host      string
+	client    *http.Client
+	allowlist *RepoAllowlist
 }
 
 func (*GitHubProvider) Type() Type { return TypeGitHub }
 
-func NewGitHubProvider(host string) *GitHubProvider {
+func (p *GitHubProvider) Allow(repo string) bool { return p.allowlist.Allow(repo) }
+
+func NewGitHubProvider(host string, allowlist *RepoAllowlist) *GitHubProvider {
 	return &GitHubProvider{
-		host:   host,
-		client: &http.Client{Timeout: 30 * time.Second},
+		host:      host,
+		client:    &http.Client{Timeout: 30 * time.Second},
+		allowlist: allowlist,
 	}
 }
 

@@ -17,12 +17,11 @@ import (
 type Host = string
 
 type Config struct {
-	Server    ServerConfig
-	Database  database.Config
-	Forges    map[Host]forge.Provider
-	Allowlist map[Host]*forge.RepoAllowlist
-	Storages  map[Host]storage.Backend
-	Log       LogConfig
+	Server   ServerConfig
+	Database database.Config
+	Forges   map[Host]forge.Provider
+	Storages map[Host]storage.Backend
+	Log      LogConfig
 }
 
 type ServerConfig struct {
@@ -110,7 +109,6 @@ func loadConfig(customPath string) (*Config, error) {
 	}
 
 	c.Forges = make(map[string]forge.Provider)
-	c.Allowlist = make(map[string]*forge.RepoAllowlist)
 	c.Storages = make(map[string]storage.Backend)
 	for _, s := range f.Sections() {
 		rest, ok := strings.CutPrefix(s.Name(), forgeSectionPrefix)
@@ -136,17 +134,16 @@ func loadConfig(customPath string) (*Config, error) {
 		if !ok {
 			return nil, errors.Newf("forge %q references unconfigured storage %q", host, fc.Storage)
 		}
-		allow, err := forge.NewRepoAllowlist(fc.RepoAllowlist)
+		allowlist, err := forge.NewRepoAllowlist(fc.RepoAllowlist)
 		if err != nil {
 			return nil, errors.Wrapf(err, "forge %q REPO_ALLOWLIST", host)
 		}
-		c.Allowlist[host] = allow
 		if fc.SkipAuth {
-			c.Forges[host] = forge.SkipAuthProvider{}
+			c.Forges[host] = forge.NewSkipAuthProvider(allowlist)
 		} else {
 			switch fc.Type {
 			case forge.TypeGitHub:
-				c.Forges[host] = forge.NewGitHubProvider(host)
+				c.Forges[host] = forge.NewGitHubProvider(host, allowlist)
 			default:
 				return nil, errors.Newf("forge %q has unknown type %q", host, fc.Type)
 			}
