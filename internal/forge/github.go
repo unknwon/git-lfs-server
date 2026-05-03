@@ -70,14 +70,14 @@ func (p *GitHubProvider) Authorize(ctx context.Context, logger *logx.Logger, rep
 	url := p.apiBase + "/repos/" + repo
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return "", 0, errors.Wrap(err, "create request")
+		return "", -1, errors.Wrap(err, "create request")
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return "", 0, errors.Wrap(err, "call GitHub API")
+		return "", -1, errors.Wrap(err, "call GitHub API")
 	}
 	defer func() {
 		// Drain before close so the underlying connection is eligible for
@@ -89,14 +89,14 @@ func (p *GitHubProvider) Authorize(ctx context.Context, logger *logx.Logger, rep
 	switch resp.StatusCode {
 	case http.StatusOK:
 	case http.StatusUnauthorized, http.StatusNotFound:
-		return "", 0, errors.WithStack(ErrTokenInvalid)
+		return "", -1, errors.WithStack(ErrTokenInvalid)
 	default:
-		return "", 0, errors.Newf("unexpected status %d from GitHub API", resp.StatusCode)
+		return "", -1, errors.Newf("unexpected status %d from GitHub API", resp.StatusCode)
 	}
 
 	var body githubRepoResponse
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return "", 0, errors.Wrap(err, "decode GitHub API response")
+		return "", -1, errors.Wrap(err, "decode GitHub API response")
 	}
 
 	var perm Permission
@@ -106,7 +106,7 @@ func (p *GitHubProvider) Authorize(ctx context.Context, logger *logx.Logger, rep
 	case body.Permissions.Pull:
 		perm = PermissionRead
 	default:
-		return "", 0, errors.WithStack(ErrTokenInvalid)
+		return "", -1, errors.WithStack(ErrTokenInvalid)
 	}
 	return perm, githubTokenTTL(ctx, logger, resp.Header.Get(githubExpirationHeader)), nil
 }
