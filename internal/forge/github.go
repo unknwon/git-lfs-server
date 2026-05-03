@@ -55,6 +55,17 @@ const (
 
 const githubExpirationHeader = "github-authentication-token-expiration"
 
+// Wire formats observed for the github-authentication-token-expiration header.
+// Classic PATs emit the zone-abbreviation form (e.g. "2024-04-27 20:14:21 UTC");
+// fine-grained PATs and GitHub App user tokens emit the numeric-offset form
+// reflecting the token owner's timezone (e.g. "2025-09-10 02:30:13 +0200").
+// GitHub does not document the format, so we mirror the dual-layout strategy
+// used by google/go-github (issue #2649).
+var githubExpirationLayouts = []string{
+	"2006-01-02 15:04:05 MST",
+	"2006-01-02 15:04:05 -0700",
+}
+
 func (p *GitHubProvider) Authorize(ctx context.Context, logger *logx.Logger, repo, token string) (Permission, time.Duration, error) {
 	url := "https://api.github.com/repos/" + repo
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -104,10 +115,20 @@ func githubCacheTTL(ctx context.Context, logger *logx.Logger, header string) tim
 	if header == "" {
 		return githubDefaultTTL
 	}
-	expiry, err := time.Parse(time.RFC3339, header)
-	if err != nil {
+	var expiry time.Time
+	var parseErr error
+	for _, layout := range githubExpirationLayouts {
+		t, err := time.Parse(layout, header)
+		if err == nil {
+			expiry = t
+			parseErr = nil
+			break
+		}
+		parseErr = err
+	}
+	if expiry.IsZero() {
 		logger.WarnContext(ctx, "Failed to parse GitHub token expiration header, falling back to default TTL",
-			"header", githubExpirationHeader, "value", header, "error", err)
+			"header", githubExpirationHeader, "value", header, "error", parseErr)
 		return githubDefaultTTL
 	}
 	ttl := time.Until(expiry) - githubMargin
