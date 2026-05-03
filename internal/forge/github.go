@@ -51,14 +51,16 @@ type githubRepoResponse struct {
 	} `json:"permissions"`
 }
 
-// Wire formats observed for the github-authentication-token-expiration header.
-// Classic PATs emit the zone-abbreviation form (e.g. "2024-04-27 20:14:21 UTC");
-// fine-grained PATs and GitHub App user tokens emit the numeric-offset form
-// reflecting the token owner's timezone (e.g. "2025-09-10 02:30:13 +0200").
-// GitHub does not document the format, so we mirror the dual-layout strategy
-// used by google/go-github (issue #2649).
+// githubExpirationHeader is the response header GitHub sets on token-bearing
+// API calls to advertise when the token expires.
 const githubExpirationHeader = "github-authentication-token-expiration"
 
+// githubExpirationLayouts holds the wire formats observed for
+// githubExpirationHeader. Classic PATs emit the zone-abbreviation form
+// (e.g. "2024-04-27 20:14:21 UTC"); fine-grained PATs and GitHub App user
+// tokens emit the numeric-offset form reflecting the token owner's timezone
+// (e.g. "2025-09-10 02:30:13 +0200"). GitHub does not document the format,
+// so we mirror the dual-layout strategy used by google/go-github (issue #2649).
 var githubExpirationLayouts = []string{
 	"2006-01-02 15:04:05 MST",
 	"2006-01-02 15:04:05 -0700",
