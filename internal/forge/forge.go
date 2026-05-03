@@ -2,6 +2,7 @@ package forge
 
 import (
 	"context"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 
@@ -36,6 +37,12 @@ type Config struct {
 	// every request. For local development only. Loaders MUST surface a
 	// warning for any forge that has this enabled.
 	SkipAuth bool `ini:"SKIP_AUTH"`
+	// RepoAllowlist restricts which repositories on this forge the server
+	// accepts. Each entry is either a literal repo path or a path ending in
+	// "/**" that matches any non-empty suffix. Entries are matched against
+	// the repo path (excluding host), case-insensitive. Empty list allows
+	// every repo.
+	RepoAllowlist []string `ini:"REPO_ALLOWLIST" delim:","`
 }
 
 // Provider authorizes a token against a repository on a specific forge host.
@@ -43,6 +50,10 @@ type Provider interface {
 	// Type identifies the forge implementation, matching the TYPE key in the
 	// [forge "{host}"] config section.
 	Type() Type
+	// Allow reports whether repo (already lowercased, full path after host)
+	// is permitted by the forge's REPO_ALLOWLIST. An empty allowlist
+	// permits every repo.
+	Allow(repo string) bool
 	Authorize(ctx context.Context, logger *logx.Logger, repo, token string) (Permission, error)
 }
 
@@ -50,13 +61,97 @@ type Provider interface {
 // required repository access.
 var ErrTokenInvalid = errors.New("forge: token is invalid or lacks repository access")
 
-// SkipAuthProvider wraps another Provider and short-circuits Authorize to
-// always return PermissionWrite without contacting the underlying forge.
-// Used only when [forge "{host}"] sets SKIP_AUTH = true.
-type SkipAuthProvider struct{}
+// SkipAuthProvider short-circuits Authorize to always return PermissionWrite
+// without contacting the underlying forge. Used only when [forge "{host}"]
+// sets SKIP_AUTH = true. The allowlist still applies.
+type SkipAuthProvider struct {
+	allowlist *RepoAllowlist
+}
 
-func (SkipAuthProvider) Type() Type { return TypeSkipAuth }
+func NewSkipAuthProvider(allowlist *RepoAllowlist) *SkipAuthProvider {
+	return &SkipAuthProvider{allowlist: allowlist}
+}
 
-func (SkipAuthProvider) Authorize(ctx context.Context, logger *logx.Logger, repo, token string) (Permission, error) {
+func (*SkipAuthProvider) Type() Type { return TypeSkipAuth }
+
+func (p *SkipAuthProvider) Allow(repo string) bool { return p.allowlist.Allow(repo) }
+
+func (*SkipAuthProvider) Authorize(ctx context.Context, logger *logx.Logger, repo, token string) (Permission, error) {
 	return PermissionWrite, nil
+}
+
+// RepoAllowlist is a compiled, case-insensitive matcher for the
+// REPO_ALLOWLIST config key. A nil receiver allows every repo so callers
+// can use the zero map value as "unrestricted".
+type RepoAllowlist struct {
+	exact    map[string]struct{}
+	prefixes []string
+}
+
+// NewRepoAllowlist compiles raw entries from config. Entries are trimmed
+// and lowercased; empty entries are dropped so trailing commas and a key
+// set to the empty string both yield a nil matcher (allow all).
+func NewRepoAllowlist(entries []string) (*RepoAllowlist, error) {
+	a := &RepoAllowlist{exact: make(map[string]struct{})}
+	for _, raw := range entries {
+		entry := strings.ToLower(strings.TrimSpace(raw))
+		if entry == "" {
+			continue
+		}
+		prefix, isPrefix, err := parseAllowlistEntry(entry)
+		if err != nil {
+			return nil, errors.Wrapf(err, "invalid entry %q", entry)
+		}
+		if isPrefix {
+			a.prefixes = append(a.prefixes, prefix+"/")
+			continue
+		}
+		a.exact[entry] = struct{}{}
+	}
+	if len(a.exact) == 0 && len(a.prefixes) == 0 {
+		return nil, nil
+	}
+	return a, nil
+}
+
+// Allow reports whether repo (already lowercased, full path after host) is
+// permitted.
+func (a *RepoAllowlist) Allow(repo string) bool {
+	if a == nil {
+		return true
+	}
+	if _, ok := a.exact[repo]; ok {
+		return true
+	}
+	for _, p := range a.prefixes {
+		if len(repo) > len(p) && strings.HasPrefix(repo, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// parseAllowlistEntry validates a normalized entry and reports whether it
+// is a "<prefix>/**" form. For prefix entries the returned prefix has the
+// trailing "/**" stripped.
+func parseAllowlistEntry(entry string) (prefix string, isPrefix bool, err error) {
+	if entry == "**" {
+		return "", false, errors.New(`bare "**" matches everything; leave the key empty instead`)
+	}
+	if strings.HasPrefix(entry, "/") {
+		return "", false, errors.New(`must not start with "/"`)
+	}
+	if strings.Contains(entry, "//") {
+		return "", false, errors.New(`must not contain "//"`)
+	}
+	if p, ok := strings.CutSuffix(entry, "/**"); ok {
+		if strings.Contains(p, "*") {
+			return "", false, errors.New(`"*" is only allowed as the final "/**" segment`)
+		}
+		return p, true, nil
+	}
+	if strings.Contains(entry, "*") {
+		return "", false, errors.New(`"*" is only allowed as the final "/**" segment`)
+	}
+	return "", false, nil
 }

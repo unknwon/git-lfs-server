@@ -16,6 +16,7 @@ This applies to all texts, including but not limited to UI, documentation, code 
 - Use `github.com/cockroachdb/errors` for error handling.
     - Always wrap errors with context using `errors.Wrap` or `errors.Wrapf`. Do not return bare errors.
 - Use `github.com/stretchr/testify` for assertions in tests. Be mindful about the choice of `require` and `assert`, the former should be used when the test cannot proceed meaningfully after a failed assertion.
+- Prefer grouping related cases as `t.Run` subtests under a single top-level `TestXxx` function, instead of writing one top-level `TestXxx_Case` per case. Reserve separate top-level functions for unrelated subjects and complex subtest setup.
 - Always use backtick (raw string) literals for multi-line strings. Never use `"...\n" +` concatenation.
 - When each is available, the first set of arguments should always be: `context.Context`, `*logx.Logger`.
     - Logger scoping (`logger.Scoped(...)`) is done at the call site, not inside the callee's constructor. The constructor stores the logger as-is.

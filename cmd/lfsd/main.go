@@ -141,6 +141,12 @@ func authorize(forges map[string]forge.Provider) flamego.Handler {
 			return
 		}
 
+		if !provider.Allow(repo) {
+			logger.InfoContext(ctx, "Repository rejected by allowlist", "host", host, "repo", repo)
+			http.Error(c.ResponseWriter(), "repository is not in the allowlist", http.StatusForbidden)
+			return
+		}
+
 		perm, err := provider.Authorize(ctx, logger.Scoped("forge"), repo, token)
 		if err != nil {
 			if errors.Is(err, forge.ErrTokenInvalid) {

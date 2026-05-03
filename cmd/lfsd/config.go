@@ -134,12 +134,16 @@ func loadConfig(customPath string) (*Config, error) {
 		if !ok {
 			return nil, errors.Newf("forge %q references unconfigured storage %q", host, fc.Storage)
 		}
+		allowlist, err := forge.NewRepoAllowlist(fc.RepoAllowlist)
+		if err != nil {
+			return nil, errors.Wrapf(err, "forge %q REPO_ALLOWLIST", host)
+		}
 		if fc.SkipAuth {
-			c.Forges[host] = forge.SkipAuthProvider{}
+			c.Forges[host] = forge.NewSkipAuthProvider(allowlist)
 		} else {
 			switch fc.Type {
 			case forge.TypeGitHub:
-				c.Forges[host] = forge.NewGitHubProvider(host)
+				c.Forges[host] = forge.NewGitHubProvider(host, allowlist)
 			default:
 				return nil, errors.Newf("forge %q has unknown type %q", host, fc.Type)
 			}
