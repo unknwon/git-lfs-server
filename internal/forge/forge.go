@@ -47,16 +47,6 @@ type Config struct {
 }
 
 // Provider authorizes a token against a repository on a specific forge host.
-//
-// The duration returned by Authorize describes when the token expires relative
-// to now:
-//   - Negative: caching is not safe for this decision. Either the provider
-//     explicitly opts out (e.g., skip-auth) or it received an expiry signal it
-//     could not interpret and is failing closed.
-//   - Zero: the provider has no expiry signal; the caller may apply a
-//     conservative default TTL.
-//   - Positive: the raw time until the token expires; the caller should apply
-//     a safety margin and a maximum cap before caching.
 type Provider interface {
 	// Type identifies the forge implementation, matching the TYPE key in the
 	// [forge "{host}"] config section.
@@ -65,6 +55,16 @@ type Provider interface {
 	// is permitted by the forge's REPO_ALLOWLIST. An empty allowlist
 	// permits every repo.
 	Allow(repo string) bool
+	// Authorize verifies that token grants access to repo and reports the
+	// effective Permission. The returned duration tells the caller how long
+	// the decision is safe to cache, relative to now:
+	//   - Negative: caching is not safe. Either the provider explicitly opts
+	//     out (e.g., skip-auth) or it received an expiry signal it could not
+	//     interpret and is failing closed.
+	//   - Zero: no expiry signal; the caller may apply a conservative default
+	//     TTL.
+	//   - Positive: the raw time until the token expires; the caller should
+	//     apply a safety margin and a maximum cap before caching.
 	Authorize(ctx context.Context, logger *logx.Logger, repo, token string) (Permission, time.Duration, error)
 }
 
