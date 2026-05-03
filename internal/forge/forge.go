@@ -83,7 +83,6 @@ func (*SkipAuthProvider) Type() Type { return TypeSkipAuth }
 func (p *SkipAuthProvider) Allow(repo string) bool { return p.allowlist.Allow(repo) }
 
 func (*SkipAuthProvider) Authorize(ctx context.Context, logger *logx.Logger, repo, token string) (Permission, time.Duration, error) {
-	// Dev-mode results have no real expiry; -1 keeps them out of the cache.
 	return PermissionWrite, -1, nil
 }
 
