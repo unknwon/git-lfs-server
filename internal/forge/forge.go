@@ -115,7 +115,7 @@ func NewRepoAllowlist(entries []string) (*RepoAllowlist, error) {
 }
 
 // Allow reports whether repo (already lowercased, full path after host) is
-// permitted. A nil receiver allows everything.
+// permitted.
 func (a *RepoAllowlist) Allow(repo string) bool {
 	if a == nil {
 		return true
@@ -124,7 +124,7 @@ func (a *RepoAllowlist) Allow(repo string) bool {
 		return true
 	}
 	for _, p := range a.prefixes {
-		if strings.HasPrefix(repo, p) {
+		if len(repo) > len(p) && strings.HasPrefix(repo, p) {
 			return true
 		}
 	}

@@ -80,6 +80,7 @@ func TestRepoAllowlist_Allow(t *testing.T) {
 		assert.True(t, a.Allow("myorg/anything"))
 		assert.True(t, a.Allow("myorg/sub/repo"))
 		assert.False(t, a.Allow("myorg"))
+		assert.False(t, a.Allow("myorg/"), `"/**" requires a non-empty suffix`)
 		assert.False(t, a.Allow("other/anything"))
 		assert.False(t, a.Allow("myorganization/repo"), "prefix requires the trailing slash boundary")
 	})
