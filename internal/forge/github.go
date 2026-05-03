@@ -3,6 +3,7 @@ package forge
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"time"
 
@@ -38,39 +39,83 @@ type githubRepoResponse struct {
 	} `json:"permissions"`
 }
 
-func (p *GitHubProvider) Authorize(ctx context.Context, logger *logx.Logger, repo, token string) (Permission, error) {
+// Cache TTL policy for permission decisions returned from the GitHub API.
+//
+// GitHub returns the github-authentication-token-expiration response header for
+// fine-grained PATs and GitHub App user tokens. When present, we cache the
+// decision until margin before the token expires (so the cache never serves a
+// decision tied to an already-invalid token). When absent — classic PATs and
+// OAuth tokens — we fall back to defaultTTL. maxTTL caps both paths so a
+// long-lived token never sits in the cache for an unbounded window.
+const (
+	githubDefaultTTL = 5 * time.Minute
+	githubMaxTTL     = 1 * time.Hour
+	githubMargin     = 5 * time.Minute
+)
+
+const githubExpirationHeader = "github-authentication-token-expiration"
+
+func (p *GitHubProvider) Authorize(ctx context.Context, logger *logx.Logger, repo, token string) (Permission, time.Duration, error) {
 	url := "https://api.github.com/repos/" + repo
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return "", errors.Wrap(err, "create request")
+		return "", 0, errors.Wrap(err, "create request")
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return "", errors.Wrap(err, "call GitHub API")
+		return "", 0, errors.Wrap(err, "call GitHub API")
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		// Drain before close so the underlying connection is eligible for
+		// keep-alive reuse on the early-return error paths below.
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
 
 	switch resp.StatusCode {
 	case http.StatusOK:
 	case http.StatusUnauthorized, http.StatusNotFound:
-		return "", errors.WithStack(ErrTokenInvalid)
+		return "", 0, errors.WithStack(ErrTokenInvalid)
 	default:
-		return "", errors.Newf("unexpected status %d from GitHub API", resp.StatusCode)
+		return "", 0, errors.Newf("unexpected status %d from GitHub API", resp.StatusCode)
 	}
 
 	var body githubRepoResponse
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return "", errors.Wrap(err, "decode GitHub API response")
+		return "", 0, errors.Wrap(err, "decode GitHub API response")
 	}
 
-	if body.Permissions.Push {
-		return PermissionWrite, nil
+	var perm Permission
+	switch {
+	case body.Permissions.Push:
+		perm = PermissionWrite
+	case body.Permissions.Pull:
+		perm = PermissionRead
+	default:
+		return "", 0, errors.WithStack(ErrTokenInvalid)
 	}
-	if body.Permissions.Pull {
-		return PermissionRead, nil
+	return perm, githubCacheTTL(ctx, logger, resp.Header.Get(githubExpirationHeader)), nil
+}
+
+func githubCacheTTL(ctx context.Context, logger *logx.Logger, header string) time.Duration {
+	if header == "" {
+		return githubDefaultTTL
 	}
-	return "", errors.WithStack(ErrTokenInvalid)
+	expiry, err := time.Parse(time.RFC3339, header)
+	if err != nil {
+		logger.WarnContext(ctx, "Failed to parse GitHub token expiration header, falling back to default TTL",
+			"header", githubExpirationHeader, "value", header, "error", err)
+		return githubDefaultTTL
+	}
+	ttl := time.Until(expiry) - githubMargin
+	if ttl <= 0 {
+		return -1
+	}
+	if ttl > githubMaxTTL {
+		return githubMaxTTL
+	}
+	return ttl
 }

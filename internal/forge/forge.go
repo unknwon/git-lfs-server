@@ -3,6 +3,7 @@ package forge
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/cockroachdb/errors"
 
@@ -46,6 +47,11 @@ type Config struct {
 }
 
 // Provider authorizes a token against a repository on a specific forge host.
+//
+// The returned duration is the cache TTL the provider considers safe for the
+// permission decision. A negative value signals the caller MUST NOT cache the
+// result (e.g., the token is about to expire, or the provider has no expiry
+// signal it can stand behind).
 type Provider interface {
 	// Type identifies the forge implementation, matching the TYPE key in the
 	// [forge "{host}"] config section.
@@ -54,7 +60,7 @@ type Provider interface {
 	// is permitted by the forge's REPO_ALLOWLIST. An empty allowlist
 	// permits every repo.
 	Allow(repo string) bool
-	Authorize(ctx context.Context, logger *logx.Logger, repo, token string) (Permission, error)
+	Authorize(ctx context.Context, logger *logx.Logger, repo, token string) (Permission, time.Duration, error)
 }
 
 // ErrTokenInvalid signals that the supplied token is invalid or lacks the
@@ -76,8 +82,9 @@ func (*SkipAuthProvider) Type() Type { return TypeSkipAuth }
 
 func (p *SkipAuthProvider) Allow(repo string) bool { return p.allowlist.Allow(repo) }
 
-func (*SkipAuthProvider) Authorize(ctx context.Context, logger *logx.Logger, repo, token string) (Permission, error) {
-	return PermissionWrite, nil
+func (*SkipAuthProvider) Authorize(ctx context.Context, logger *logx.Logger, repo, token string) (Permission, time.Duration, error) {
+	// Dev-mode results have no real expiry; -1 keeps them out of the cache.
+	return PermissionWrite, -1, nil
 }
 
 // RepoAllowlist is a compiled, case-insensitive matcher for the

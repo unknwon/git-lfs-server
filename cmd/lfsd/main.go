@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"os"
 	"os/signal"
@@ -9,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/cockroachdb/errors"
+	"github.com/flamego/cache"
 	"github.com/flamego/flamego"
 	"github.com/sourcegraph/conc"
 
@@ -54,6 +57,7 @@ func main() {
 	f := flamego.New()
 	f.Map(logger)
 	f.Use(flamego.Recovery())
+	f.Use(cache.Cacher())
 
 	f.Get("/healthz", serveHealthz(db))
 
@@ -117,7 +121,7 @@ func serveHealthz(db *database.DB) flamego.Handler {
 }
 
 func authorize(forges map[string]forge.Provider) flamego.Handler {
-	return func(c flamego.Context, logger *logx.Logger) {
+	return func(c flamego.Context, logger *logx.Logger, store cache.Cache) {
 		logger = logger.Scoped("authorize")
 		ctx := c.Request().Context()
 
@@ -147,7 +151,18 @@ func authorize(forges map[string]forge.Provider) flamego.Handler {
 			return
 		}
 
-		perm, err := provider.Authorize(ctx, logger.Scoped("forge"), repo, token)
+		key := authCacheKey(host, repo, token)
+		if v, err := store.Get(ctx, key); err == nil {
+			if perm, ok := v.(forge.Permission); ok {
+				c.Map(perm)
+				return
+			}
+			logger.DebugContext(ctx, "Discarding auth cache entry of unexpected type")
+		} else if !errors.Is(err, os.ErrNotExist) {
+			logger.DebugContext(ctx, "Auth cache lookup failed", "error", err)
+		}
+
+		perm, ttl, err := provider.Authorize(ctx, logger.Scoped("forge"), repo, token)
 		if err != nil {
 			if errors.Is(err, forge.ErrTokenInvalid) {
 				http.Error(c.ResponseWriter(), "token is invalid or lacks repository access", http.StatusForbidden)
@@ -158,6 +173,23 @@ func authorize(forges map[string]forge.Provider) flamego.Handler {
 			return
 		}
 
+		if ttl >= 0 {
+			// Decouple the cache write from the request context so a client
+			// disconnect between the upstream call and the Set doesn't drop
+			// the entry on backends that honor cancellation.
+			setCtx := context.WithoutCancel(ctx)
+			if err := store.Set(setCtx, key, perm, ttl); err != nil {
+				logger.WarnContext(ctx, "Failed to cache authorization result", "error", err)
+			}
+		}
+
 		c.Map(perm)
 	}
+}
+
+// authCacheKey hashes the host, repo, and token together so the cache never
+// retains plaintext tokens in its keyspace.
+func authCacheKey(host, repo, token string) string {
+	sum := sha256.Sum256([]byte(host + ":" + repo + ":" + token))
+	return hex.EncodeToString(sum[:])
 }
