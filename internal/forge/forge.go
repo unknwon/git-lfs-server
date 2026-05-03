@@ -3,6 +3,7 @@ package forge
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/cockroachdb/errors"
 
@@ -54,7 +55,17 @@ type Provider interface {
 	// is permitted by the forge's REPO_ALLOWLIST. An empty allowlist
 	// permits every repo.
 	Allow(repo string) bool
-	Authorize(ctx context.Context, logger *logx.Logger, repo, token string) (Permission, error)
+	// Authorize verifies that token grants access to repo and reports the
+	// effective Permission. The returned duration tells the caller how long
+	// the decision is safe to cache, relative to now:
+	//   - Negative: caching is not safe. Either the provider explicitly opts
+	//     out (e.g., skip-auth) or it received an expiry signal it could not
+	//     interpret and is failing closed.
+	//   - Zero: no expiry signal; the caller may apply a conservative default
+	//     TTL.
+	//   - Positive: the raw time until the token expires; the caller should
+	//     apply a safety margin and a maximum cap before caching.
+	Authorize(ctx context.Context, logger *logx.Logger, repo, token string) (Permission, time.Duration, error)
 }
 
 // ErrTokenInvalid signals that the supplied token is invalid or lacks the
@@ -76,8 +87,8 @@ func (*SkipAuthProvider) Type() Type { return TypeSkipAuth }
 
 func (p *SkipAuthProvider) Allow(repo string) bool { return p.allowlist.Allow(repo) }
 
-func (*SkipAuthProvider) Authorize(ctx context.Context, logger *logx.Logger, repo, token string) (Permission, error) {
-	return PermissionWrite, nil
+func (*SkipAuthProvider) Authorize(ctx context.Context, logger *logx.Logger, repo, token string) (Permission, time.Duration, error) {
+	return PermissionWrite, -1, nil
 }
 
 // RepoAllowlist is a compiled, case-insensitive matcher for the

@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/cockroachdb/errors"
+	"github.com/flamego/cache"
 	"github.com/flamego/flamego"
 	"github.com/sourcegraph/conc"
 
@@ -54,6 +55,7 @@ func main() {
 	f := flamego.New()
 	f.Map(logger)
 	f.Use(flamego.Recovery())
+	f.Use(cache.Cacher())
 
 	f.Get("/healthz", serveHealthz(db))
 
@@ -113,51 +115,5 @@ func serveHealthz(db *database.DB) flamego.Handler {
 		}
 		c.ResponseWriter().WriteHeader(http.StatusOK)
 		_, _ = c.ResponseWriter().Write([]byte("ok"))
-	}
-}
-
-func authorize(forges map[string]forge.Provider) flamego.Handler {
-	return func(c flamego.Context, logger *logx.Logger) {
-		logger = logger.Scoped("authorize")
-		ctx := c.Request().Context()
-
-		host := hostFromContext(c)
-		provider, ok := forges[host]
-		if !ok {
-			http.Error(c.ResponseWriter(), "unsupported forge host", http.StatusBadRequest)
-			return
-		}
-
-		_, token, ok := c.Request().BasicAuth()
-		if !ok || token == "" {
-			c.ResponseWriter().Header().Set("WWW-Authenticate", `Basic realm="git-lfs"`)
-			http.Error(c.ResponseWriter(), "basic auth credentials are required", http.StatusUnauthorized)
-			return
-		}
-
-		repo := strings.ToLower(c.Param("**"))
-		if repo == "" {
-			http.Error(c.ResponseWriter(), "repository path is missing", http.StatusBadRequest)
-			return
-		}
-
-		if !provider.Allow(repo) {
-			logger.InfoContext(ctx, "Repository rejected by allowlist", "host", host, "repo", repo)
-			http.Error(c.ResponseWriter(), "repository is not in the allowlist", http.StatusForbidden)
-			return
-		}
-
-		perm, err := provider.Authorize(ctx, logger.Scoped("forge"), repo, token)
-		if err != nil {
-			if errors.Is(err, forge.ErrTokenInvalid) {
-				http.Error(c.ResponseWriter(), "token is invalid or lacks repository access", http.StatusForbidden)
-			} else {
-				logger.ErrorContext(ctx, "Failed to verify repository permissions", "repo", repo, "error", err)
-				http.Error(c.ResponseWriter(), http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			}
-			return
-		}
-
-		c.Map(perm)
 	}
 }
