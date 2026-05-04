@@ -75,7 +75,7 @@ Authentication and authorization are delegated to the upstream forge per request
 - GitLab.com
 - GitLab self-managed
 
-The server does not call the forge for any other purpose, so a forge whose API is not listed here cannot be added by configuration alone; it requires a new provider implementation.
+For any other forge, set `SKIP_AUTH = true` on its `[forge "{host}"]` section and gate authentication in front of lfsd with a reverse proxy.
 
 ## Repo allowlist
 
