@@ -61,11 +61,11 @@ Git LFS resolves the LFS endpoint per repository. To point a clone at lfsd, set 
 git config -f .lfsconfig lfs.url https://lfs.example.com/github.com/myorg/myrepo/info/lfs
 ```
 
-The client sends the same forge token it would send to GitHub directly (configured via your usual Git credential helper) as the HTTP basic password.
+The client sends the same forge token it would send to GitHub directly (configured via your usual Git credential helper) as the HTTP Basic Auth password.
 
 ## Authentication
 
-The server does not maintain its own user database. Clients authenticate to lfsd over HTTP basic auth, where the password slot carries the same forge token the client already uses against the upstream forge. lfsd then delegates the access check to that forge before issuing object URLs.
+The server does not maintain its own user database. Clients authenticate to lfsd over HTTP Basic Auth, where the password slot carries the same forge token the client already uses against the upstream forge. lfsd then delegates the access check to that forge before issuing object URLs.
 
 For `TYPE = github`, the provider forwards the token as a `Bearer` credential to `GET /repos/{owner}/{repo}` on the forge's REST API:
 
