@@ -71,7 +71,7 @@ Authentication and authorization are delegated to the upstream forge per request
 - GitHub.com
 - GitHub Enterprise Server
 - GitLab.com
-- GitLab self-managed
+- GitLab Self-Managed
 
 For any other forge, set `SKIP_AUTH = true` on its `[forge "{host}"]` section and gate authentication in front of lfsd with a reverse proxy.
 
