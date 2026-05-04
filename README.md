@@ -14,11 +14,6 @@ Assuming 1 TiB is uploaded and stored for a full month, and 3 TiB is downloaded 
 | Cloudflare R2 Standard | 1,090 GB-month x $0.015 x 12 = $196.20 | Included | $196.20 | $6,343.80 (97.00%) |
 | Backblaze B2 | 1 TB x $6.95 x 12 = $83.40 | Free up to 3x storage | $83.40 | $6,456.60 (98.72%) |
 
-## Supported forges
-
-- GitHub.com
-- GitHub Enterprise Server
-
 ## Example setup
 
 ### Server
@@ -51,7 +46,7 @@ ENDPOINT = https://%(ACCOUNT_ID)s.r2.cloudflarestorage.com
 
 `EXTERNAL_URL` is the public origin clients reach the server at. It is used as the base for the object download, upload, and verify URLs the server returns to the client, so it must match what the client sees (typically the public HTTPS URL terminated by your reverse proxy).
 
-At least one `[forge "{host}"]` section must be configured. Each forge references a `[storage "{name}"]` section by name; multiple forges may share a single storage backend. Supported storage types are `filesystem` and `s3-presign` (compatible with S3, R2, DigitalOcean Spaces, etc.).
+At least one `[forge "{host}"]` section must be configured. Each forge references a `[storage "{name}"]` section by name. Multiple forges may share a single storage backend. Supported storage types are `filesystem` and `s3-presign` (compatible with S3, R2, DigitalOcean Spaces, etc.).
 
 ### Client
 
@@ -67,9 +62,18 @@ The client sends the same forge token it would send to GitHub directly (configur
 
 The server does not maintain its own user database. Clients authenticate to lfsd over HTTP Basic Auth using the same forge token they would use against the upstream forge as the password, and lfsd defers the access check to the forge.
 
-A token with push permission grants write access (uploads and downloads); pull permission grants read access (downloads only); anything else is rejected. Successful authorizations are cached in memory; tokens with a known expiry are cached up to that expiry, others fall back to a short default.
+A token that the forge grants push (or equivalent) on the target repository gives write access (uploads and downloads). A token with read-only access gives read access (downloads only). Anything else is rejected. Successful authorizations are cached in memory. Tokens with a known expiry are cached up to that expiry, others fall back to a short default.
 
-`SKIP_AUTH = true` bypasses the forge check and grants write access to every request.
+### Supported forges
+
+Authentication and authorization are delegated to the upstream forge per request. The following forges are supported:
+
+- GitHub.com
+- GitHub Enterprise Server
+- GitLab.com
+- GitLab Self-Managed
+
+For any other forge, set `SKIP_AUTH = true` on its `[forge "{host}"]` section and gate authentication in front of lfsd with a reverse proxy.
 
 ## Repo allowlist
 
@@ -80,7 +84,7 @@ Each entry is one of:
 - A literal repo path, e.g., `myorg/my-repo`, which matches that path exactly.
 - A `<prefix>/**` pattern, e.g., `myorg/**`, which matches any non-empty suffix under the prefix.
 
-The glob `**` is only allowed as the final segment. Bare `**` is rejected; leave the key empty to allow all repos. Example:
+The glob `**` is only allowed as the final segment. Bare `**` is rejected. To allow all repos, leave the key empty. Example:
 
 ```ini
 [forge "github.com"]

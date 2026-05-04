@@ -89,7 +89,7 @@ func New(ctx context.Context, logger *logx.Logger, cfg Config) (*DB, error) {
 		return nil, errors.Wrap(err, "get underlying *sql.DB")
 	}
 
-	// Configure connection pool; only set values that are positive to avoid
+	// Configure connection pool. Only set values that are positive to avoid
 	// unexpected behaviour from zero or negative inputs.
 	if cfg.MaxOpenConns > 0 {
 		sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)

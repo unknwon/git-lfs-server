@@ -29,7 +29,7 @@ func main() {
 	configPath := strx.Coalesce(os.Getenv("LFSD_CONFIG_PATH"), "config.ini")
 	config, err := loadConfig(configPath)
 	if err != nil {
-		// Logger is not yet available; write to stderr and exit.
+		// Logger is not yet available, write to stderr and exit.
 		_, _ = os.Stderr.WriteString("Failed to load config: " + err.Error() + "\n")
 		os.Exit(1)
 	}

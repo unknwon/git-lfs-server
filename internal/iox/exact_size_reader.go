@@ -42,7 +42,7 @@ func (s *ExactSizeReader) Read(p []byte) (int, error) {
 	}
 	// io.ErrUnexpectedEOF is what http.Request.Body and io.ReadFull return when
 	// a length-prefixed stream ends before the declared length. Treat it the
-	// same as io.EOF for size verification; any other error propagates.
+	// same as io.EOF for size verification. Any other error propagates.
 	if (errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)) && s.read != s.expected {
 		return n, errors.WithStack(&SizeMismatchError{Expected: s.expected, Actual: s.read})
 	}

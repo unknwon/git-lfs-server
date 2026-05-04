@@ -18,7 +18,7 @@ import (
 )
 
 // presignURLTTL bounds how long a client has to *initiate* the request.
-// S3/R2 validate the signature at request start; once the transfer begins
+// S3/R2 validate the signature at request start. Once the transfer begins
 // in-window it can run as long as needed. Because we serve presigned URLs
 // via a 307 redirect, the client follows immediately, so there is no idle
 // gap to budget for. Keep this short so a leaked URL has limited utility.
@@ -80,7 +80,7 @@ func newS3PresignBackendWithClient(client *s3.Client, name, scheme, bucket strin
 	}
 }
 
-// URI returns the canonical {scheme}{bucket}/{oid} location. Pure function;
+// URI returns the canonical {scheme}{bucket}/{oid} location. Pure function,
 // safe to call without I/O.
 func (b *S3PresignBackend) URI(oid string) string {
 	return b.scheme + b.bucket + "/" + oid
