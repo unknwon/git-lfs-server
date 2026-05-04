@@ -15,8 +15,7 @@ import (
 var _ Provider = (*GitLabProvider)(nil)
 
 type GitLabProvider struct {
-	host      string
-	gitBase   string
+	baseURL   string
 	client    *http.Client
 	allowlist *RepoAllowlist
 }
@@ -27,17 +26,10 @@ func (p *GitLabProvider) Allow(repo string) bool { return p.allowlist.Allow(repo
 
 func NewGitLabProvider(host string, allowlist *RepoAllowlist) *GitLabProvider {
 	return &GitLabProvider{
-		host:      host,
-		gitBase:   gitlabGitBase(host),
+		baseURL:   "https://" + host,
 		client:    &http.Client{Timeout: 30 * time.Second},
 		allowlist: allowlist,
 	}
-}
-
-// gitlabGitBase resolves the smart Git HTTP root for a forge host. GitLab.com
-// and self-managed GitLab both serve repositories on the same hostname.
-func gitlabGitBase(host string) string {
-	return "https://" + host
 }
 
 func (p *GitLabProvider) Authorize(ctx context.Context, logger *logx.Logger, repo, token string) (Permission, time.Duration, error) {
@@ -60,7 +52,7 @@ func (p *GitLabProvider) Authorize(ctx context.Context, logger *logx.Logger, rep
 }
 
 func (p *GitLabProvider) allowGitService(ctx context.Context, repo, token, service string) (bool, error) {
-	endpoint := gitlabSmartHTTPURL(p.gitBase, repo, service)
+	endpoint := gitlabSmartHTTPURL(p.baseURL, repo, service)
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, endpoint, nil)
 	if err != nil {
 		return false, errors.Wrap(err, "create request")

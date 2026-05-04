@@ -14,16 +14,6 @@ import (
 	"unknwon.dev/git-lfs-server/internal/logx"
 )
 
-func TestGitLabGitBase(t *testing.T) {
-	t.Run("gitlab.com uses the public host", func(t *testing.T) {
-		assert.Equal(t, "https://gitlab.com", gitlabGitBase("gitlab.com"))
-	})
-
-	t.Run("self-managed uses the appliance host", func(t *testing.T) {
-		assert.Equal(t, "https://gitlab.example.com", gitlabGitBase("gitlab.example.com"))
-	})
-}
-
 func TestGitLabSmartHTTPURL(t *testing.T) {
 	t.Run("nested repo path remains path segments", func(t *testing.T) {
 		got := gitlabSmartHTTPURL("https://gitlab.example.com", "group/sub/project", "git-upload-pack")
@@ -112,7 +102,7 @@ func TestGitLabProviderAuthorize(t *testing.T) {
 			defer server.Close()
 
 			provider := NewGitLabProvider("gitlab.example.com", nil)
-			provider.gitBase = server.URL
+			provider.baseURL = server.URL
 			provider.client = server.Client()
 
 			perm, ttl, err := provider.Authorize(context.Background(), logx.NewNoopLogger(), "group/sub/project", "token")
