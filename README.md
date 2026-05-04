@@ -56,7 +56,7 @@ Git LFS resolves the LFS endpoint per repository. To point a clone at lfsd, set 
 git config -f .lfsconfig lfs.url https://lfs.example.com/github.com/myorg/myrepo/info/lfs
 ```
 
-The client appends `/objects/batch`, `/objects/{oid}`, and `/objects/verify` to that URL, which maps to the server route `/{host}/{**}/info/lfs/objects/...` where `{host}` is `github.com` and `{**}` is `myorg/myrepo`. The client sends the same forge token it would send to GitHub directly (configured via your usual Git credential helper) as the HTTP Basic password.
+The client sends the same forge token it would send to GitHub directly (configured via your usual Git credential helper) as the HTTP Basic password.
 
 ## Authentication
 
