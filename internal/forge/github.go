@@ -66,7 +66,7 @@ var githubExpirationLayouts = []string{
 	"2006-01-02 15:04:05 -0700",
 }
 
-func (p *GitHubProvider) Authorize(ctx context.Context, logger *logx.Logger, repo, token string) (Permission, time.Duration, error) {
+func (p *GitHubProvider) Authorize(ctx context.Context, logger *logx.Logger, repo, username, token string) (Permission, time.Duration, error) {
 	url := p.apiBase + "/repos/" + repo
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

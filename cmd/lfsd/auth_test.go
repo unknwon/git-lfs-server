@@ -33,3 +33,11 @@ func TestAuthCacheTTL(t *testing.T) {
 		assert.Equal(t, time.Duration(-1), authCacheTTL(authCacheTTLMargin))
 	})
 }
+
+func TestAuthCacheKey(t *testing.T) {
+	t.Run("includes username", func(t *testing.T) {
+		first := authCacheKey("gitlab.example.com", "group/repo", "deploy-token", "token")
+		second := authCacheKey("gitlab.example.com", "group/repo", "oauth2", "token")
+		assert.NotEqual(t, first, second)
+	})
+}

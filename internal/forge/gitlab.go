@@ -2,6 +2,7 @@ package forge
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -32,8 +33,8 @@ func NewGitLabProvider(host string, allowlist *RepoAllowlist) *GitLabProvider {
 	}
 }
 
-func (p *GitLabProvider) Authorize(ctx context.Context, logger *logx.Logger, repo, token string) (Permission, time.Duration, error) {
-	allowed, err := p.allowGitService(ctx, repo, token, "git-receive-pack")
+func (p *GitLabProvider) Authorize(ctx context.Context, logger *logx.Logger, repo, username, token string) (Permission, time.Duration, error) {
+	allowed, err := p.allowGitService(ctx, repo, username, token, "git-receive-pack")
 	if err != nil {
 		return "", -1, err
 	}
@@ -41,7 +42,7 @@ func (p *GitLabProvider) Authorize(ctx context.Context, logger *logx.Logger, rep
 		return PermissionWrite, 0, nil
 	}
 
-	allowed, err = p.allowGitService(ctx, repo, token, "git-upload-pack")
+	allowed, err = p.allowGitService(ctx, repo, username, token, "git-upload-pack")
 	if err != nil {
 		return "", -1, err
 	}
@@ -51,21 +52,25 @@ func (p *GitLabProvider) Authorize(ctx context.Context, logger *logx.Logger, rep
 	return "", -1, errors.WithStack(ErrTokenInvalid)
 }
 
-func (p *GitLabProvider) allowGitService(ctx context.Context, repo, token, service string) (bool, error) {
+func (p *GitLabProvider) allowGitService(ctx context.Context, repo, username, token, service string) (bool, error) {
 	endpoint := gitlabSmartHTTPURL(p.baseURL, repo, service)
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, endpoint, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return false, errors.Wrap(err, "create request")
 	}
-	// GitLab documents "oauth2" as the username for OAuth tokens, while PAT,
-	// project, and group tokens accept any non-empty username.
-	req.SetBasicAuth("oauth2", token)
+	if username == "" {
+		username = "oauth2"
+	}
+	req.SetBasicAuth(username, token)
 
 	resp, err := p.client.Do(req)
 	if err != nil {
 		return false, errors.Wrapf(err, "call GitLab %s", service)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
 
 	switch resp.StatusCode {
 	case http.StatusOK:

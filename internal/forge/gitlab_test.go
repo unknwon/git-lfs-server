@@ -75,10 +75,10 @@ func TestGitLabProviderAuthorize(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var gotServices []string
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				assert.Equal(t, http.MethodHead, r.Method)
+				assert.Equal(t, http.MethodGet, r.Method)
 				username, password, ok := r.BasicAuth()
 				assert.True(t, ok)
-				assert.Equal(t, "oauth2", username)
+				assert.Equal(t, "deploy-token", username)
 				assert.Equal(t, "token", password)
 				assert.Equal(t, "/group/sub/project.git/info/refs", r.URL.Path)
 
@@ -105,7 +105,7 @@ func TestGitLabProviderAuthorize(t *testing.T) {
 			provider.baseURL = server.URL
 			provider.client = server.Client()
 
-			perm, ttl, err := provider.Authorize(context.Background(), logx.NewNoopLogger(), "group/sub/project", "token")
+			perm, ttl, err := provider.Authorize(context.Background(), logx.NewNoopLogger(), "group/sub/project", "deploy-token", "token")
 			if tt.wantErrIsInvalid || tt.wantErrContains != "" {
 				require.Error(t, err)
 				assert.Equal(t, Permission(""), perm)
@@ -124,4 +124,24 @@ func TestGitLabProviderAuthorize(t *testing.T) {
 			assert.Equal(t, tt.wantServices, gotServices)
 		})
 	}
+}
+
+func TestGitLabProviderAuthorizeEmptyUsernameFallback(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		username, password, ok := r.BasicAuth()
+		assert.True(t, ok)
+		assert.Equal(t, "oauth2", username)
+		assert.Equal(t, "token", password)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	provider := NewGitLabProvider("gitlab.example.com", nil)
+	provider.baseURL = server.URL
+	provider.client = server.Client()
+
+	perm, ttl, err := provider.Authorize(context.Background(), logx.NewNoopLogger(), "group/sub/project", "", "token")
+	require.NoError(t, err)
+	assert.Equal(t, PermissionWrite, perm)
+	assert.Equal(t, time.Duration(0), ttl)
 }
