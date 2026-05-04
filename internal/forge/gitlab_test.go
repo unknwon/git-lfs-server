@@ -1,85 +1,137 @@
 package forge
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"unknwon.dev/git-lfs-server/internal/logx"
 )
 
-func TestGitLabAPIBase(t *testing.T) {
+func TestGitLabGitBase(t *testing.T) {
 	t.Run("gitlab.com uses the public host", func(t *testing.T) {
-		assert.Equal(t, "https://gitlab.com/api/v4", gitlabAPIBase("gitlab.com"))
+		assert.Equal(t, "https://gitlab.com", gitlabGitBase("gitlab.com"))
 	})
 
 	t.Run("self-managed uses the appliance host", func(t *testing.T) {
-		assert.Equal(t, "https://gitlab.example.com/api/v4", gitlabAPIBase("gitlab.example.com"))
+		assert.Equal(t, "https://gitlab.example.com", gitlabGitBase("gitlab.example.com"))
 	})
 }
 
-func TestGitLabPermissionFromResponse(t *testing.T) {
-	withAccess := func(project, group int) *gitlabProjectResponse {
-		body := &gitlabProjectResponse{}
-		if project >= 0 {
-			body.Permissions.ProjectAccess = &struct {
-				AccessLevel int `json:"access_level"`
-			}{AccessLevel: project}
-		}
-		if group >= 0 {
-			body.Permissions.GroupAccess = &struct {
-				AccessLevel int `json:"access_level"`
-			}{AccessLevel: group}
-		}
-		return body
+func TestGitLabSmartHTTPURL(t *testing.T) {
+	t.Run("nested repo path remains path segments", func(t *testing.T) {
+		got := gitlabSmartHTTPURL("https://gitlab.example.com", "group/sub/project", "git-upload-pack")
+		assert.Equal(t, "https://gitlab.example.com/group/sub/project.git/info/refs?service=git-upload-pack", got)
+	})
+
+	t.Run("repo path segments are escaped", func(t *testing.T) {
+		got := gitlabSmartHTTPURL("https://gitlab.example.com", "group/sub project/repo#1", "git-receive-pack")
+		assert.Equal(t, "https://gitlab.example.com/group/sub%20project/repo%231.git/info/refs?service=git-receive-pack", got)
+	})
+}
+
+func TestGitLabProviderAuthorize(t *testing.T) {
+	tests := []struct {
+		name             string
+		receiveStatus    int
+		uploadStatus     int
+		wantPerm         Permission
+		wantErrIsInvalid bool
+		wantErrContains  string
+		wantServices     []string
+	}{
+		{
+			name:          "receive pack grants write",
+			receiveStatus: http.StatusOK,
+			wantPerm:      PermissionWrite,
+			wantServices:  []string{"git-receive-pack"},
+		},
+		{
+			name:          "upload pack grants read after write denied",
+			receiveStatus: http.StatusForbidden,
+			uploadStatus:  http.StatusOK,
+			wantPerm:      PermissionRead,
+			wantServices:  []string{"git-receive-pack", "git-upload-pack"},
+		},
+		{
+			name:             "both services denied rejects token",
+			receiveStatus:    http.StatusForbidden,
+			uploadStatus:     http.StatusNotFound,
+			wantErrIsInvalid: true,
+			wantServices:     []string{"git-receive-pack", "git-upload-pack"},
+		},
+		{
+			name:            "unexpected receive status returns error",
+			receiveStatus:   http.StatusInternalServerError,
+			wantErrContains: "unexpected status 500 from GitLab git-receive-pack",
+			wantServices:    []string{"git-receive-pack"},
+		},
+		{
+			name:            "unexpected upload status returns error",
+			receiveStatus:   http.StatusUnauthorized,
+			uploadStatus:    http.StatusInternalServerError,
+			wantErrContains: "unexpected status 500 from GitLab git-upload-pack",
+			wantServices:    []string{"git-receive-pack", "git-upload-pack"},
+		},
 	}
 
-	t.Run("both null is rejected", func(t *testing.T) {
-		_, ok := gitlabPermissionFromResponse(withAccess(-1, -1))
-		assert.False(t, ok)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotServices []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, http.MethodHead, r.Method)
+				username, password, ok := r.BasicAuth()
+				assert.True(t, ok)
+				assert.Equal(t, "oauth2", username)
+				assert.Equal(t, "token", password)
+				assert.Equal(t, "/group/sub/project.git/info/refs", r.URL.Path)
 
-	t.Run("guest access is rejected", func(t *testing.T) {
-		// Access level 10 (Guest) is below Reporter (20) and grants no LFS
-		// read or write. Mapping it to PermissionRead would let a guest
-		// download objects the upstream forge would block.
-		_, ok := gitlabPermissionFromResponse(withAccess(10, -1))
-		assert.False(t, ok)
-	})
+				service := r.URL.Query().Get("service")
+				gotServices = append(gotServices, service)
+				switch service {
+				case "git-receive-pack":
+					w.WriteHeader(tt.receiveStatus)
+				case "git-upload-pack":
+					if tt.uploadStatus == 0 {
+						t.Error("unexpected upload-pack request")
+						w.WriteHeader(http.StatusInternalServerError)
+						return
+					}
+					w.WriteHeader(tt.uploadStatus)
+				default:
+					t.Errorf("unexpected service %q", service)
+					w.WriteHeader(http.StatusInternalServerError)
+				}
+			}))
+			defer server.Close()
 
-	t.Run("reporter is read-only", func(t *testing.T) {
-		perm, ok := gitlabPermissionFromResponse(withAccess(20, -1))
-		assert.True(t, ok)
-		assert.Equal(t, PermissionRead, perm)
-	})
+			provider := NewGitLabProvider("gitlab.example.com", nil)
+			provider.gitBase = server.URL
+			provider.client = server.Client()
 
-	t.Run("developer is read-write", func(t *testing.T) {
-		perm, ok := gitlabPermissionFromResponse(withAccess(30, -1))
-		assert.True(t, ok)
-		assert.Equal(t, PermissionWrite, perm)
-	})
-
-	t.Run("maintainer is read-write", func(t *testing.T) {
-		perm, ok := gitlabPermissionFromResponse(withAccess(40, -1))
-		assert.True(t, ok)
-		assert.Equal(t, PermissionWrite, perm)
-	})
-
-	t.Run("owner is read-write", func(t *testing.T) {
-		perm, ok := gitlabPermissionFromResponse(withAccess(50, -1))
-		assert.True(t, ok)
-		assert.Equal(t, PermissionWrite, perm)
-	})
-
-	t.Run("group access raises effective level above project access", func(t *testing.T) {
-		// User is a Reporter on the project but Developer on the parent
-		// group. The inherited group access should win.
-		perm, ok := gitlabPermissionFromResponse(withAccess(20, 30))
-		assert.True(t, ok)
-		assert.Equal(t, PermissionWrite, perm)
-	})
-
-	t.Run("project access raises effective level above group access", func(t *testing.T) {
-		perm, ok := gitlabPermissionFromResponse(withAccess(40, 20))
-		assert.True(t, ok)
-		assert.Equal(t, PermissionWrite, perm)
-	})
+			perm, ttl, err := provider.Authorize(context.Background(), logx.NewNoopLogger(), "group/sub/project", "token")
+			if tt.wantErrIsInvalid || tt.wantErrContains != "" {
+				require.Error(t, err)
+				assert.Equal(t, Permission(""), perm)
+				assert.Equal(t, time.Duration(-1), ttl)
+				if tt.wantErrIsInvalid {
+					assert.True(t, errors.Is(err, ErrTokenInvalid))
+				}
+				if tt.wantErrContains != "" {
+					assert.Contains(t, err.Error(), tt.wantErrContains)
+				}
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantPerm, perm)
+				assert.Equal(t, time.Duration(0), ttl)
+			}
+			assert.Equal(t, tt.wantServices, gotServices)
+		})
+	}
 }
