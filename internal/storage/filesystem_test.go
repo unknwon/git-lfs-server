@@ -71,7 +71,7 @@ func TestFilesystemBackend_Put(t *testing.T) {
 		uri1, err := b.Put(context.Background(), oid, strings.NewReader(body))
 		require.NoError(t, err)
 
-		final := strings.TrimPrefix(uri1, testFilesystemScheme)
+		final := b.storagePath(oid)
 		mtimeBefore, err := os.Stat(final)
 		require.NoError(t, err)
 
@@ -133,7 +133,7 @@ func TestFilesystemBackend_Put(t *testing.T) {
 func TestFilesystemBackend_Open(t *testing.T) {
 	t.Run("not found", func(t *testing.T) {
 		b := newTestBackend(t)
-		uri := testFilesystemScheme + b.storagePath(sha256Hex("missing"))
+		uri := b.uriFromPath(b.storagePath(sha256Hex("missing")))
 		_, err := b.Open(context.Background(), uri)
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, ErrNotFound))
@@ -163,13 +163,13 @@ func TestFilesystemBackend_Delete(t *testing.T) {
 		require.NoError(t, err)
 
 		require.NoError(t, b.Delete(context.Background(), uri))
-		_, err = os.Stat(strings.TrimPrefix(uri, testFilesystemScheme))
+		_, err = os.Stat(b.storagePath(oid))
 		assert.True(t, os.IsNotExist(err))
 	})
 
 	t.Run("idempotent on missing", func(t *testing.T) {
 		b := newTestBackend(t)
-		uri := testFilesystemScheme + b.storagePath(sha256Hex("never-existed"))
+		uri := b.uriFromPath(b.storagePath(sha256Hex("never-existed")))
 		require.NoError(t, b.Delete(context.Background(), uri))
 	})
 }

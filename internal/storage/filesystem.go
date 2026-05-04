@@ -51,7 +51,7 @@ func (b *FilesystemBackend) Put(ctx context.Context, oid string, r io.Reader) (s
 		return "", errors.Newf("invalid oid %q", oid)
 	}
 	final := b.storagePath(oid)
-	uri := b.scheme + final
+	uri := b.uriFromPath(final)
 
 	if _, err := os.Stat(final); err == nil {
 		return uri, nil
@@ -114,16 +114,34 @@ func (b *FilesystemBackend) Delete(ctx context.Context, uri string) error {
 	return nil
 }
 
+// uriFromPath builds an RFC 8089 file URI from an absolute filesystem path.
+// On Windows, an extra leading slash is inserted so "C:\foo" becomes
+// "file:///C:/foo" rather than "file://C:/foo" (where url.Parse would read
+// "C" as the host and ":/foo" as a port).
+func (b *FilesystemBackend) uriFromPath(path string) string {
+	slashed := filepath.ToSlash(path)
+	if !strings.HasPrefix(slashed, "/") {
+		slashed = "/" + slashed
+	}
+	return b.scheme + slashed
+}
+
 func (b *FilesystemBackend) pathFromURI(uri string) (string, error) {
+	wantScheme := strings.TrimSuffix(b.scheme, "://")
 	u, err := url.Parse(uri)
 	if err != nil {
 		return "", errors.Wrapf(err, "parse storage uri %q", uri)
 	}
-	wantScheme := strings.TrimSuffix(b.scheme, "://")
 	if u.Scheme != wantScheme {
 		return "", errors.Newf("unsupported scheme %q in uri %q", u.Scheme, uri)
 	}
-	path, err := filepath.Abs(u.Path)
+	// On Windows, a URI like "file:///C:/foo" parses with Path="/C:/foo";
+	// drop the leading slash so filepath.Abs sees a valid drive-rooted path.
+	rawPath := u.Path
+	if filepath.Separator == '\\' && len(rawPath) >= 3 && rawPath[0] == '/' && rawPath[2] == ':' {
+		rawPath = rawPath[1:]
+	}
+	path, err := filepath.Abs(filepath.FromSlash(rawPath))
 	if err != nil {
 		return "", errors.Wrapf(err, "resolve storage uri path %q", u.Path)
 	}
