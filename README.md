@@ -14,7 +14,9 @@ Assuming 1 TiB is uploaded and stored for a full month, and 3 TiB is downloaded 
 | Cloudflare R2 Standard | 1,090 GB-month x $0.015 x 12 = $196.20 | Included | $196.20 | $6,343.80 (97.00%) |
 | Backblaze B2 | 1 TB x $6.95 x 12 = $83.40 | Free up to 3x storage | $83.40 | $6,456.60 (98.72%) |
 
-## Example configuration
+## Example setup
+
+### Server
 
 The server loads its built-in defaults from [`internal/embed/config.ini`](internal/embed/config.ini) and then layers a custom file on top. The custom file path is read from `LFSD_CONFIG_PATH` and defaults to `config.ini` in the working directory:
 
@@ -22,9 +24,12 @@ The server loads its built-in defaults from [`internal/embed/config.ini`](intern
 LFSD_CONFIG_PATH=/etc/lfsd/config.ini lfsd
 ```
 
-Values of the form `${NAME}` in the config are expanded from the process environment at load time. A minimal override that points GitHub.com at Cloudflare R2 looks like:
+Values of the form `${NAME}` in the config are expanded from the process environment at load time. A minimal override that serves GitHub.com repositories from Cloudflare R2 at `https://lfs.example.com` looks like:
 
 ```ini
+[server]
+EXTERNAL_URL = https://lfs.example.com
+
 [forge "github.com"]
 TYPE = github
 STORAGE = r2
@@ -39,7 +44,19 @@ SECRET_ACCESS_KEY = ${LFSD_R2_SECRET_ACCESS_KEY}
 ENDPOINT = https://%(ACCOUNT_ID)s.r2.cloudflarestorage.com
 ```
 
+`EXTERNAL_URL` is the public origin clients reach the server at. The server hands it back inside the LFS batch response as the base for object download, upload, and verify URLs, so it must match what the client sees (typically the public HTTPS URL terminated by your reverse proxy).
+
 At least one `[forge "{host}"]` section must be configured. Each forge references a `[storage "{name}"]` section by name; multiple forges may share a single storage backend. Supported storage types are `filesystem` and `s3-presign` (compatible with S3, R2, DigitalOcean Spaces, etc.).
+
+### Client
+
+Git LFS resolves the LFS endpoint per repository. To point a clone at lfsd, set `lfs.url` in the repository's `.lfsconfig` (committed so collaborators inherit it) to `EXTERNAL_URL` joined with the forge host and the repository path:
+
+```sh
+git config -f .lfsconfig lfs.url https://lfs.example.com/github.com/myorg/myrepo
+```
+
+For the GitHub.com repository `myorg/myrepo`, this maps to the server route `/{host}/{**}/info/lfs/objects`, where `{host}` is `github.com` and `{**}` is `myorg/myrepo`. The client then sends the same forge token it would send to GitHub directly (configured via your usual Git credential helper) as the HTTP Basic password.
 
 ## Authentication
 
