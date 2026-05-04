@@ -99,13 +99,13 @@ The allowlist is enforced before the forge token check, so a request for a disal
 
 This project uses [moon](https://moonrepo.dev/) as its task runner. Install it with Homebrew:
 
-```sh
+```zsh
 brew install moon
 ```
 
 Common tasks:
 
-```sh
+```zsh
 moon run :install   # Tidy Go modules.
 moon run :lint      # Run golangci-lint.
 moon run :test      # Run the test suite.
