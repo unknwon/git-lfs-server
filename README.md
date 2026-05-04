@@ -14,6 +14,13 @@ Assuming 1 TiB is uploaded and stored for a full month, and 3 TiB is downloaded 
 | Cloudflare R2 Standard | 1,090 GB-month x $0.015 x 12 = $196.20 | Included | $196.20 | $6,343.80 (97.00%) |
 | Backblaze B2 | 1 TB x $6.95 x 12 = $83.40 | Free up to 3x storage | $83.40 | $6,456.60 (98.72%) |
 
+## Supported forges
+
+| Forge | `TYPE` | Notes |
+| --- | --- | --- |
+| GitHub.com | `github` | |
+| GitHub Enterprise Server | `github` | The forge host in the section header is the appliance host (e.g. `[forge "ghe.example.com"]`). The provider derives the REST API base from it (`https://{host}/api/v3`). |
+
 ## Example setup
 
 ### Server
