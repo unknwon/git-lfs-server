@@ -69,6 +69,8 @@ The server does not maintain its own user database. Clients authenticate to lfsd
 
 A token with push permission grants write access (uploads and downloads); pull permission grants read access (downloads only); anything else is rejected. Successful authorizations are cached in memory; tokens with a known expiry are cached up to that expiry, others fall back to a short default.
 
+`SKIP_AUTH = true` bypasses the forge check and grants write access to every request.
+
 ## Repo allowlist
 
 A forge section may restrict which repositories the server will serve via `REPO_ALLOWLIST`. The value is a comma-separated list matched case-insensitively against the path portion of the URL after the host. An empty or unset list accepts every repository the forge authorizes.
