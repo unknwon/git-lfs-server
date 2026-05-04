@@ -40,7 +40,7 @@ func main() {
 	for host, provider := range config.Forges {
 		logger.InfoContext(ctx, "Forge initialized", "host", host, "type", provider.Type())
 		if provider.Type() == forge.TypeSkipAuth {
-			logger.WarnContext(ctx, "Forge auth is disabled — every request grants write access", "host", host)
+			logger.WarnContext(ctx, "Forge auth is disabled, every request grants write access", "host", host)
 		}
 	}
 	for host, backend := range config.Storages {

@@ -113,7 +113,7 @@ func New(ctx context.Context, logger *logx.Logger, cfg Config) (*DB, error) {
 		return nil, errors.Wrap(err, "auto-migrate database tables")
 	}
 
-	// AutoMigrate doesn't emit CHECK constraints. Add ours idempotently —
+	// AutoMigrate doesn't emit CHECK constraints. Add ours idempotently:
 	// Postgres has no "ADD CONSTRAINT IF NOT EXISTS" form for CHECK, so we
 	// catch duplicate_object via SQLSTATE.
 	if err = gormDB.Exec(`

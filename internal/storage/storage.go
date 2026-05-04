@@ -57,7 +57,7 @@ type Presigner interface {
 	// safe to compute without I/O.
 	URI(oid string) string
 	// PresignPut returns a short-lived URL the client PUTs to, plus the
-	// headers the client must send verbatim — the SDK signs these into the
+	// headers the client must send verbatim. The SDK signs these into the
 	// URL, so the server cannot omit them.
 	PresignPut(ctx context.Context, oid string, size int64) (url string, headers map[string]string, err error)
 	// PresignGet returns a short-lived URL the client GETs from. No headers
