@@ -65,17 +65,11 @@ The client sends the same forge token it would send to GitHub directly (configur
 
 ## Authentication
 
-The server does not maintain its own user database. Clients authenticate to lfsd over HTTP Basic Auth, where the password slot carries the same forge token the client already uses against the upstream forge. lfsd then delegates the access check to that forge before issuing object URLs.
+The server does not maintain its own user database. Clients authenticate to lfsd over HTTP Basic Auth using the same forge token they would use against the upstream forge as the password, and lfsd defers the access check to the forge.
 
-For `TYPE = github`, the provider forwards the token as a `Bearer` credential to `GET /repos/{owner}/{repo}` on the forge's REST API:
+A token with push permission grants write access (uploads and downloads); pull permission grants read access (downloads only); anything else is rejected. Successful authorizations are cached in memory; tokens with a known expiry are cached up to that expiry, others fall back to a short default.
 
-- `200 OK` with `permissions.push` → write access (uploads and downloads).
-- `200 OK` with `permissions.pull` → read access (downloads only).
-- `401 Unauthorized` or `404 Not Found` → token rejected.
-
-For fine-grained PATs and GitHub App user tokens, the server reads the `github-authentication-token-expiration` response header and caches the authorization decision in memory up to the token's own expiry, with a safety margin subtracted and a maximum cap applied. Classic PATs and OAuth tokens do not advertise an expiry, so they fall back to a short default TTL.
-
-`SKIP_AUTH = true` short-circuits the forge call and grants write access to every request. It exists only for local development; the server logs a warning at startup for any forge that has it enabled. Do not set it in production.
+`SKIP_AUTH = true` bypasses the forge check and grants write access to every request. It exists only for local development; the server logs a warning at startup for any forge that has it enabled. Do not set it in production.
 
 ## Repo allowlist
 
