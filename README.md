@@ -44,7 +44,7 @@ SECRET_ACCESS_KEY = ${LFSD_R2_SECRET_ACCESS_KEY}
 ENDPOINT = https://%(ACCOUNT_ID)s.r2.cloudflarestorage.com
 ```
 
-`EXTERNAL_URL` is the public origin clients reach the server at. The server hands it back inside the LFS batch response as the base for object download, upload, and verify URLs, so it must match what the client sees (typically the public HTTPS URL terminated by your reverse proxy).
+`EXTERNAL_URL` is the public origin clients reach the server at. It is used as the base for the object download, upload, and verify URLs the server returns to the client, so it must match what the client sees (typically the public HTTPS URL terminated by your reverse proxy).
 
 At least one `[forge "{host}"]` section must be configured. Each forge references a `[storage "{name}"]` section by name; multiple forges may share a single storage backend. Supported storage types are `filesystem` and `s3-presign` (compatible with S3, R2, DigitalOcean Spaces, etc.).
 
