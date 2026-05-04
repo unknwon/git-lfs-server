@@ -16,10 +16,8 @@ Assuming 1 TiB is uploaded and stored for a full month, and 3 TiB is downloaded 
 
 ## Supported forges
 
-| Forge | `TYPE` | Notes |
-| --- | --- | --- |
-| GitHub.com | `github` | |
-| GitHub Enterprise Server | `github` | The forge host in the section header is the appliance host (e.g. `[forge "ghe.example.com"]`). The provider derives the REST API base from it (`https://{host}/api/v3`). |
+- GitHub.com
+- GitHub Enterprise Server
 
 ## Example setup
 
