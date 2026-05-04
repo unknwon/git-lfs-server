@@ -55,11 +55,11 @@ jobs:
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
             BUILD_COMMIT=${{ github.sha }}
           tags: |
-            ghcr.io/unknwon/lfsd:latest
+            ghcr.io/unknwon/lfsd:edge
       - name: Scan for container vulnerabilities
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
         with:
-          image-ref: ghcr.io/unknwon/lfsd:latest
+          image-ref: ghcr.io/unknwon/lfsd:edge
           exit-code: '1'
       - name: Send email on failure
         uses: unknwon/send-email-on-failure@89339a1bc93f4ad1d30f3b7e4911fcba985c9adb # v1
@@ -118,10 +118,21 @@ jobs:
       contents: read
       packages: write
     steps:
-      - name: Compute image tag
+      - name: Compute image tags
         run: |
           IMAGE_TAG=$(echo $GITHUB_REF_NAME | cut -c 2-)
-          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+
+          TAGS="ghcr.io/unknwon/lfsd:$IMAGE_TAG"
+
+          # Tag stable releases (no prerelease suffix per semver) as :latest.
+          if [[ ! "$IMAGE_TAG" =~ - ]]; then
+            TAGS="$TAGS
+          ghcr.io/unknwon/lfsd:latest"
+          fi
+
+          echo "TAGS<<EOF" >> $GITHUB_ENV
+          echo "$TAGS" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
       - name: Check out code
         uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
       - name: Set up QEMU
@@ -153,8 +164,7 @@ jobs:
           build-args: |
             BUILD_DATE=${{ github.event.release.published_at }}
             BUILD_COMMIT=${{ github.sha }}
-          tags: |
-            ghcr.io/unknwon/lfsd:${{ env.IMAGE_TAG }}
+          tags: ${{ env.TAGS }}
       - name: Send email on failure
         uses: unknwon/send-email-on-failure@89339a1bc93f4ad1d30f3b7e4911fcba985c9adb # v1
         if: ${{ failure() }}
