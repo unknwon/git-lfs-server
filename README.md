@@ -43,7 +43,7 @@ At least one `[forge "{host}"]` section must be configured. Each forge reference
 
 ## Authentication
 
-The server does not maintain its own user database. Clients authenticate to lfsd over HTTP Basic auth — the password slot carries the same forge token the client already uses against the upstream forge — and lfsd delegates the access check to that forge before issuing object URLs.
+The server does not maintain its own user database. Clients authenticate to lfsd over HTTP Basic auth, where the password slot carries the same forge token the client already uses against the upstream forge. lfsd then delegates the access check to that forge before issuing object URLs.
 
 For `TYPE = github`, the provider forwards the token as a `Bearer` credential to `GET /repos/{owner}/{repo}` on the forge's REST API:
 
@@ -64,7 +64,7 @@ Each entry is one of:
 - A literal repo path, e.g., `myorg/my-repo`, which matches that path exactly.
 - A `<prefix>/**` pattern, e.g., `myorg/**`, which matches any non-empty suffix under the prefix.
 
-`*` is only allowed as the final `/**` segment. Bare `**` is rejected — leave the key empty to allow all repos. Example:
+`*` is only allowed as the final `/**` segment. Bare `**` is rejected; leave the key empty to allow all repos. Example:
 
 ```ini
 [forge "github.com"]
