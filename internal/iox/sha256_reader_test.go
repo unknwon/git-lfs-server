@@ -54,7 +54,7 @@ func TestSHA256Reader(t *testing.T) {
 		r := NewSHA256Reader(&errReader{data: []byte("ab"), err: io.ErrUnexpectedEOF}, expected)
 		_, err := io.ReadAll(r)
 		// The bytes "ab" hash to the expected digest, so even though the
-		// stream ended early, the digest matches — only the unexpected-EOF
+		// stream ended early, the digest matches and only the unexpected-EOF
 		// itself surfaces (no SHA256MismatchError wrap).
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, io.ErrUnexpectedEOF))
