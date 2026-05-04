@@ -14,13 +14,6 @@ Assuming 1 TiB is uploaded and stored for a full month, and 3 TiB is downloaded 
 | Cloudflare R2 Standard | 1,090 GB-month x $0.015 x 12 = $196.20 | Included | $196.20 | $6,343.80 (97.00%) |
 | Backblaze B2 | 1 TB x $6.95 x 12 = $83.40 | Free up to 3x storage | $83.40 | $6,456.60 (98.72%) |
 
-## Supported forges
-
-- GitHub.com
-- GitHub Enterprise Server
-- GitLab.com
-- GitLab self-managed
-
 ## Example setup
 
 ### Server
@@ -72,6 +65,17 @@ The server does not maintain its own user database. Clients authenticate to lfsd
 A token that the forge grants push (or equivalent) on the target repository gives write access (uploads and downloads); a token with read-only access gives read access (downloads only); anything else is rejected. Successful authorizations are cached in memory; tokens with a known expiry are cached up to that expiry, others fall back to a short default.
 
 `SKIP_AUTH = true` bypasses the forge check and grants write access to every request.
+
+### Supported forges
+
+Authentication and authorization are delegated to the upstream forge per request. The following forges are supported:
+
+- GitHub.com
+- GitHub Enterprise Server
+- GitLab.com
+- GitLab self-managed
+
+The server does not call the forge for any other purpose, so a forge whose API is not listed here cannot be added by configuration alone; it requires a new provider implementation.
 
 ## Repo allowlist
 
