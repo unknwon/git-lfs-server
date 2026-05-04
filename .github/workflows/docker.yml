@@ -118,23 +118,10 @@ jobs:
       contents: read
       packages: write
     steps:
-      - name: Compute image tags
+      - name: Compute image tag
         run: |
           IMAGE_TAG=$(echo $GITHUB_REF_NAME | cut -c 2-)
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
-
-          TAGS="ghcr.io/unknwon/lfsd:$IMAGE_TAG"
-
-          # Add minor version tag for stable releases (no prerelease suffix per semver).
-          if [[ ! "$IMAGE_TAG" =~ - ]]; then
-            MINOR_TAG=$(echo "$IMAGE_TAG" | cut -d. -f1,2)
-            TAGS="$TAGS
-          ghcr.io/unknwon/lfsd:$MINOR_TAG"
-          fi
-
-          echo "TAGS<<EOF" >> $GITHUB_ENV
-          echo "$TAGS" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
       - name: Check out code
         uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
       - name: Set up QEMU
@@ -166,7 +153,8 @@ jobs:
           build-args: |
             BUILD_DATE=${{ github.event.release.published_at }}
             BUILD_COMMIT=${{ github.sha }}
-          tags: ${{ env.TAGS }}
+          tags: |
+            ghcr.io/unknwon/lfsd:${{ env.IMAGE_TAG }}
       - name: Send email on failure
         uses: unknwon/send-email-on-failure@89339a1bc93f4ad1d30f3b7e4911fcba985c9adb # v1
         if: ${{ failure() }}
