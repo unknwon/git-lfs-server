@@ -113,6 +113,8 @@ moon run :build     # Compile all packages.
 moon run :dev       # Run lfsd locally against config.ini.
 ```
 
+`moon run :dev` expects a `config.ini` in the working directory. See [Example setup](#example-setup) for the minimum required keys.
+
 ## License
 
 This project is under the MIT License. See the [LICENSE](LICENSE) file for the full license text.
