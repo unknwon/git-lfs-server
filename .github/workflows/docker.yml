@@ -55,11 +55,11 @@ jobs:
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
             BUILD_COMMIT=${{ github.sha }}
           tags: |
-            ghcr.io/unknwon/git-lfs-server:latest
+            ghcr.io/unknwon/lfsd:latest
       - name: Scan for container vulnerabilities
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
         with:
-          image-ref: ghcr.io/unknwon/git-lfs-server:latest
+          image-ref: ghcr.io/unknwon/lfsd:latest
           exit-code: '1'
       - name: Send email on failure
         uses: unknwon/send-email-on-failure@89339a1bc93f4ad1d30f3b7e4911fcba985c9adb # v1
@@ -103,11 +103,11 @@ jobs:
             BUILD_DATE=${{ github.event.pull_request.updated_at }}
             BUILD_COMMIT=${{ github.event.pull_request.head.sha }}
           tags: |
-            ttl.sh/unknwon/git-lfs-server-${{ steps.short-sha.outputs.sha }}:7d
+            ttl.sh/unknwon/lfsd-${{ steps.short-sha.outputs.sha }}:7d
       - name: Scan for container vulnerabilities
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
         with:
-          image-ref: ttl.sh/unknwon/git-lfs-server-${{ steps.short-sha.outputs.sha }}:7d
+          image-ref: ttl.sh/unknwon/lfsd-${{ steps.short-sha.outputs.sha }}:7d
           exit-code: '1'
 
   buildx-release:
@@ -123,13 +123,13 @@ jobs:
           IMAGE_TAG=$(echo $GITHUB_REF_NAME | cut -c 2-)
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
 
-          TAGS="ghcr.io/unknwon/git-lfs-server:$IMAGE_TAG"
+          TAGS="ghcr.io/unknwon/lfsd:$IMAGE_TAG"
 
           # Add minor version tag for stable releases (no prerelease suffix per semver).
           if [[ ! "$IMAGE_TAG" =~ - ]]; then
             MINOR_TAG=$(echo "$IMAGE_TAG" | cut -d. -f1,2)
             TAGS="$TAGS
-          ghcr.io/unknwon/git-lfs-server:$MINOR_TAG"
+          ghcr.io/unknwon/lfsd:$MINOR_TAG"
           fi
 
           echo "TAGS<<EOF" >> $GITHUB_ENV
