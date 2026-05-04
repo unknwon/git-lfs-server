@@ -35,8 +35,8 @@ func NewGitHubProvider(host string, allowlist *RepoAllowlist) *GitHubProvider {
 }
 
 // githubAPIBase resolves the REST API root for a forge host. github.com is
-// served from a dedicated subdomain; GitHub Enterprise Server exposes the same
-// API under "/api/v3" on the appliance host.
+// served from a dedicated subdomain. GitHub Enterprise Server exposes the
+// same API under "/api/v3" on the appliance host.
 func githubAPIBase(host string) string {
 	if host == "github.com" {
 		return "https://api.github.com"
@@ -57,7 +57,7 @@ const githubExpirationHeader = "github-authentication-token-expiration"
 
 // githubExpirationLayouts holds the wire formats observed for
 // githubExpirationHeader. Classic PATs emit the zone-abbreviation form
-// (e.g. "2024-04-27 20:14:21 UTC"); fine-grained PATs and GitHub App user
+// (e.g. "2024-04-27 20:14:21 UTC"). Fine-grained PATs and GitHub App user
 // tokens emit the numeric-offset form reflecting the token owner's timezone
 // (e.g. "2025-09-10 02:30:13 +0200"). GitHub does not document the format,
 // so we mirror the dual-layout strategy used by google/go-github (issue #2649).
@@ -115,12 +115,12 @@ func (p *GitHubProvider) Authorize(ctx context.Context, logger *logx.Logger, rep
 // GitHub-Authentication-Token-Expiration response header. The return value
 // follows the forge.Provider contract:
 //   - Zero: the header was absent (classic PATs and OAuth tokens do not emit
-//     it); the caller may apply a conservative default TTL.
+//     it). The caller may apply a conservative default TTL.
 //   - Negative: the header was present but could not be parsed against any
 //     known layout. This signals an undocumented format change on GitHub's
 //     side, so the caller must fail closed and skip caching rather than fall
 //     back to a default TTL on an expiry signal we no longer trust.
-//   - Positive: the time until the parsed expiry; the caller applies any
+//   - Positive: the time until the parsed expiry. The caller applies any
 //     safety margin and maximum cap before caching.
 func githubTokenTTL(ctx context.Context, logger *logx.Logger, header string) time.Duration {
 	if header == "" {

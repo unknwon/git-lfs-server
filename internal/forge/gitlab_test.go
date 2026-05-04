@@ -71,7 +71,7 @@ func TestGitLabPermissionFromResponse(t *testing.T) {
 
 	t.Run("group access raises effective level above project access", func(t *testing.T) {
 		// User is a Reporter on the project but Developer on the parent
-		// group; the inherited group access should win.
+		// group. The inherited group access should win.
 		perm, ok := gitlabPermissionFromResponse(withAccess(20, 30))
 		assert.True(t, ok)
 		assert.Equal(t, PermissionWrite, perm)

@@ -62,9 +62,9 @@ type Provider interface {
 	//   - Negative: caching is not safe. Either the provider explicitly opts
 	//     out (e.g., skip-auth) or it received an expiry signal it could not
 	//     interpret and is failing closed.
-	//   - Zero: no expiry signal; the caller may apply a conservative default
+	//   - Zero: no expiry signal. The caller may apply a conservative default
 	//     TTL.
-	//   - Positive: the raw time until the token expires; the caller should
+	//   - Positive: the raw time until the token expires. The caller should
 	//     apply a safety margin and a maximum cap before caching.
 	Authorize(ctx context.Context, logger *logx.Logger, repo, token string) (Permission, time.Duration, error)
 }
@@ -101,7 +101,7 @@ type RepoAllowlist struct {
 }
 
 // NewRepoAllowlist compiles raw entries from config. Entries are trimmed
-// and lowercased; empty entries are dropped so trailing commas and a key
+// and lowercased. Empty entries are dropped so trailing commas and a key
 // set to the empty string both yield a nil matcher (allow all).
 func NewRepoAllowlist(entries []string) (*RepoAllowlist, error) {
 	a := &RepoAllowlist{exact: make(map[string]struct{})}

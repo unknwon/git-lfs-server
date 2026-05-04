@@ -92,7 +92,7 @@ func authCacheKey(host, repo, token string) string {
 }
 
 // Cache TTL policy for permission decisions. The forge provider returns the raw
-// time until the token expires (zero if unknown); this function applies the
+// time until the token expires (zero if unknown). This function applies the
 // default TTL, safety margin, and maximum cap so the cached entry is always
 // invalidated before the underlying token becomes stale.
 const (
@@ -103,10 +103,11 @@ const (
 
 // authCacheTTL converts a provider-reported raw token TTL into an effective
 // cache TTL. A negative rawTTL means the provider explicitly opts out of
-// caching; the returned value is also negative in that case. A zero rawTTL
-// means the provider has no expiry signal and authCacheTTLDefault is used. A
-// positive rawTTL has authCacheTTLMargin subtracted and is capped at
-// authCacheTTLMax; if the result is non-positive caching is also skipped.
+// caching, and the returned value is also negative in that case. A zero
+// rawTTL means the provider has no expiry signal and authCacheTTLDefault
+// is used. A positive rawTTL has authCacheTTLMargin subtracted and is
+// capped at authCacheTTLMax. If the result is non-positive, caching is
+// also skipped.
 func authCacheTTL(rawTTL time.Duration) time.Duration {
 	if rawTTL < 0 {
 		return -1

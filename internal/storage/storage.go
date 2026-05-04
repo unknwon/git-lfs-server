@@ -46,14 +46,14 @@ type Proxier interface {
 }
 
 // Presigner is implemented by backends that validate SHA-256 server-side.
-// The server hands the client a short-lived presigned URL; the client
+// The server hands the client a short-lived presigned URL, and the client
 // transfers bytes directly to/from the backend. The lfsd server only sees
 // JSON exchanges (batch, verify), never the object bytes.
 type Presigner interface {
 	Backend
 
 	// URI returns the canonical, non-expiring location of the object. Pure
-	// function of the OID and the backend's static config (e.g. bucket name);
+	// function of the OID and the backend's static config (e.g. bucket name),
 	// safe to compute without I/O.
 	URI(oid string) string
 	// PresignPut returns a short-lived URL the client PUTs to, plus the

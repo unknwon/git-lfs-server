@@ -42,7 +42,7 @@ func gitlabAPIBase(host string) string {
 }
 
 // GitLab numeric access levels. Mirrors the values in the upstream API
-// reference; only the levels relevant to LFS access are named here.
+// reference. Only the levels relevant to LFS access are named here.
 //
 // Reference: https://docs.gitlab.com/api/access_requests/#valid-access-levels
 const (
@@ -107,7 +107,7 @@ func (p *GitLabProvider) Authorize(ctx context.Context, logger *logx.Logger, rep
 	if !ok {
 		return "", -1, errors.WithStack(ErrTokenInvalid)
 	}
-	// GitLab does not advertise token expiry on regular API calls; learning
+	// GitLab does not advertise token expiry on regular API calls. Learning
 	// it would require a separate /personal_access_tokens/self round-trip on
 	// every request. Return zero so the caller applies its conservative
 	// default TTL instead.
