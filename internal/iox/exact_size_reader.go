@@ -8,7 +8,7 @@ import (
 )
 
 // SizeMismatchError is returned by ExactSizeReader when the stream length
-// does not match the expected size — either because EOF arrived early or
+// does not match the expected size, either because EOF arrived early or
 // because the stream exceeded the expected size mid-read.
 type SizeMismatchError struct {
 	Expected int64

@@ -9,6 +9,7 @@ This applies to all texts, including but not limited to UI, documentation, code 
 
 - Use sentence case. Preserve original casing for brand names, e.g., Git, GitHub, Go, Git LFS, NGINX.
 - End with a period for a full sentence.
+- Never use em dashes (`—`) or en dashes (`–`). Rewrite the sentence with a comma, semicolon, period, colon, or parentheses instead.
 - Do not add comments that repeat what the code is doing, always prefer more descriptive names. Do add comments for intentions that aren't obvious via reading the code alone. This rule takes precedence over matching existing patterns.
 
 ## Coding guidelines

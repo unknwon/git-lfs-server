@@ -24,7 +24,7 @@ func (e *SHA256MismatchError) Error() string {
 
 // SHA256Reader wraps an io.Reader and verifies at EOF that the SHA256 of
 // all bytes read matches the expected lowercase-hex digest. The digest is
-// hashed incrementally as bytes flow through — no buffering.
+// hashed incrementally as bytes flow through, with no buffering.
 type SHA256Reader struct {
 	r        io.Reader
 	hasher   hash.Hash
@@ -42,7 +42,7 @@ func (h *SHA256Reader) Read(p []byte) (int, error) {
 	}
 	// io.ErrUnexpectedEOF is what length-prefixed readers (http.Request.Body,
 	// io.ReadFull) return when a stream ends early. The hash is meaningful for
-	// whatever bytes flowed through — verify it the same as on a clean EOF.
+	// whatever bytes flowed through, so verify it the same as on a clean EOF.
 	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 		actual := hex.EncodeToString(h.hasher.Sum(nil))
 		if actual != h.expected {
