@@ -64,8 +64,6 @@ The server does not maintain its own user database. Clients authenticate to lfsd
 
 A token that the forge grants push (or equivalent) on the target repository gives write access (uploads and downloads); a token with read-only access gives read access (downloads only); anything else is rejected. Successful authorizations are cached in memory; tokens with a known expiry are cached up to that expiry, others fall back to a short default.
 
-`SKIP_AUTH = true` bypasses the forge check and grants write access to every request.
-
 ### Supported forges
 
 Authentication and authorization are delegated to the upstream forge per request. The following forges are supported:
