@@ -16,6 +16,7 @@ type Type string
 
 const (
 	TypeGitHub   Type = "github"
+	TypeGitLab   Type = "gitlab"
 	TypeSkipAuth Type = "skip-auth"
 )
 

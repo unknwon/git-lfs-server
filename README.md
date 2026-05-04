@@ -18,6 +18,8 @@ Assuming 1 TiB is uploaded and stored for a full month, and 3 TiB is downloaded 
 
 - GitHub.com
 - GitHub Enterprise Server
+- GitLab.com
+- GitLab self-managed
 
 ## Example setup
 
@@ -67,7 +69,7 @@ The client sends the same forge token it would send to GitHub directly (configur
 
 The server does not maintain its own user database. Clients authenticate to lfsd over HTTP Basic Auth using the same forge token they would use against the upstream forge as the password, and lfsd defers the access check to the forge.
 
-A token with push permission grants write access (uploads and downloads); pull permission grants read access (downloads only); anything else is rejected. Successful authorizations are cached in memory; tokens with a known expiry are cached up to that expiry, others fall back to a short default.
+A token that the forge grants push (or equivalent) on the target repository gives write access (uploads and downloads); a token with read-only access gives read access (downloads only); anything else is rejected. Successful authorizations are cached in memory; tokens with a known expiry are cached up to that expiry, others fall back to a short default.
 
 `SKIP_AUTH = true` bypasses the forge check and grants write access to every request.
 

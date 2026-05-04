@@ -144,6 +144,8 @@ func loadConfig(customPath string) (*Config, error) {
 			switch fc.Type {
 			case forge.TypeGitHub:
 				c.Forges[host] = forge.NewGitHubProvider(host, allowlist)
+			case forge.TypeGitLab:
+				c.Forges[host] = forge.NewGitLabProvider(host, allowlist)
 			default:
 				return nil, errors.Newf("forge %q has unknown type %q", host, fc.Type)
 			}
