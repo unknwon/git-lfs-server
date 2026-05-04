@@ -95,6 +95,24 @@ REPO_ALLOWLIST = myorg/**, otherorg/specific-repo
 
 The allowlist is enforced before the forge token check, so a request for a disallowed repo is rejected without a round-trip to the forge.
 
+## Local development
+
+This project uses [moon](https://moonrepo.dev/) as its task runner. Install it with Homebrew:
+
+```sh
+brew install moon
+```
+
+Common tasks:
+
+```sh
+moon run :install   # Tidy Go modules.
+moon run :lint      # Run golangci-lint.
+moon run :test      # Run the test suite.
+moon run :build     # Compile all packages.
+moon run :dev       # Run lfsd locally against config.ini.
+```
+
 ## License
 
 This project is under the MIT License. See the [LICENSE](LICENSE) file for the full license text.
