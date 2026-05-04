@@ -73,7 +73,7 @@ For `TYPE = github`, the provider forwards the token as a `Bearer` credential to
 - `200 OK` with `permissions.pull` → read access (downloads only).
 - `401 Unauthorized` or `404 Not Found` → token rejected.
 
-Both `github.com` and GitHub Enterprise Server are supported; the API base is selected from the forge host. For fine-grained PATs and GitHub App user tokens, the server reads the `github-authentication-token-expiration` response header and caches the authorization decision in memory up to the token's own expiry, with a safety margin subtracted and a maximum cap applied. Classic PATs and OAuth tokens do not advertise an expiry, so they fall back to a short default TTL.
+For fine-grained PATs and GitHub App user tokens, the server reads the `github-authentication-token-expiration` response header and caches the authorization decision in memory up to the token's own expiry, with a safety margin subtracted and a maximum cap applied. Classic PATs and OAuth tokens do not advertise an expiry, so they fall back to a short default TTL.
 
 `SKIP_AUTH = true` short-circuits the forge call and grants write access to every request. It exists only for local development; the server logs a warning at startup for any forge that has it enabled. Do not set it in production.
 
