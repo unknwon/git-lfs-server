@@ -80,7 +80,7 @@ Each entry is one of:
 - A literal repo path, e.g., `myorg/my-repo`, which matches that path exactly.
 - A `<prefix>/**` pattern, e.g., `myorg/**`, which matches any non-empty suffix under the prefix.
 
-`*` is only allowed as the final `/**` segment. Bare `**` is rejected; leave the key empty to allow all repos. Example:
+The glob `**` is only allowed as the final segment. Bare `**` is rejected; leave the key empty to allow all repos. Example:
 
 ```ini
 [forge "github.com"]
