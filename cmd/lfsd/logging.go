@@ -7,6 +7,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	charmlog "charm.land/log/v2"
+	"github.com/flamego/flamego"
 
 	"unknwon.dev/git-lfs-server/internal/logx"
 )
@@ -26,10 +27,14 @@ func parseLevel(s string) slog.Level {
 
 func setupLogging(cfg LogConfig) *logx.Logger {
 	level := parseLevel(cfg.Level)
-	handler := charmlog.NewWithOptions(os.Stderr, charmlog.Options{
+	opts := charmlog.Options{
 		Level:           charmlog.Level(level),
 		ReportTimestamp: true,
-	})
+	}
+	if flamego.Env() == flamego.EnvTypeProd {
+		opts.Formatter = charmlog.JSONFormatter
+	}
+	handler := charmlog.NewWithOptions(os.Stderr, opts)
 
 	// Override warn level color to amber so it is less visually "green"-ish.
 	styles := charmlog.DefaultStyles()
