@@ -18,6 +18,10 @@ type Backend interface {
 	// Type identifies the storage implementation, matching the TYPE key in the
 	// [storage "{name}"] config section.
 	Type() Type
+	// Scheme returns the URI scheme prefix (including "://") that this backend
+	// owns. Janitor uses it to route a stored URI back to the backend that
+	// owns its blob.
+	Scheme() string
 }
 
 // Type identifies a storage backend implementation. The value matches the

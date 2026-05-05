@@ -10,6 +10,7 @@ import (
 	"unknwon.dev/git-lfs-server/internal/database"
 	"unknwon.dev/git-lfs-server/internal/embed"
 	"unknwon.dev/git-lfs-server/internal/forge"
+	"unknwon.dev/git-lfs-server/internal/janitor"
 	"unknwon.dev/git-lfs-server/internal/storage"
 )
 
@@ -21,6 +22,7 @@ type Config struct {
 	Database database.Config
 	Forges   map[Host]forge.Provider
 	Storages map[Host]storage.Backend
+	Janitor  janitor.Config
 	Log      LogConfig
 }
 
@@ -61,6 +63,9 @@ func loadConfig(customPath string) (*Config, error) {
 	}
 	if err := f.Section("log").MapTo(&c.Log); err != nil {
 		return nil, errors.Wrap(err, `map [log] config`)
+	}
+	if err := f.Section("janitor").MapTo(&c.Janitor); err != nil {
+		return nil, errors.Wrap(err, `map [janitor] config`)
 	}
 
 	backendsByName := make(map[string]storage.Backend)

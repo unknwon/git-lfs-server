@@ -15,6 +15,7 @@ import (
 
 	"unknwon.dev/git-lfs-server/internal/database"
 	"unknwon.dev/git-lfs-server/internal/forge"
+	"unknwon.dev/git-lfs-server/internal/janitor"
 	"unknwon.dev/git-lfs-server/internal/logx"
 	"unknwon.dev/git-lfs-server/internal/strx"
 )
@@ -87,6 +88,9 @@ func main() {
 		if err := srv.Shutdown(context.Background()); err != nil {
 			logger.ErrorContext(ctx, "Failed to shut down HTTP server gracefully", "error", err)
 		}
+	})
+	routines.Go(func() {
+		janitor.New(db, config.Storages, config.Janitor).Run(ctx, logger.Scoped("janitor"))
 	})
 
 	logger.InfoContext(ctx, "Server ready",
