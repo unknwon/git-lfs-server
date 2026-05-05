@@ -53,7 +53,7 @@ At least one `[forge "{host}"]` section must be configured. Each forge reference
 Git LFS resolves the LFS endpoint per repository. To point a clone at lfsd, set `lfs.url` in the repository's `.lfsconfig` (committed so collaborators inherit it) to `EXTERNAL_URL` joined with the forge host, the repository path, and the `/info/lfs` suffix:
 
 ```sh
-git config -f .lfsconfig lfs.url https://lfs.example.com/github.com/myorg/myrepo/info/lfs
+git config -f .lfsconfig lfs.url https://x-access-token:$GH_TOKEN@lfs.example.com/github.com/myorg/myrepo/info/lfs
 ```
 
 The client sends the same forge token it would send to GitHub directly (configured via your usual Git credential helper) as the HTTP Basic Auth password.
