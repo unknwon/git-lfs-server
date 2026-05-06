@@ -20,18 +20,13 @@ const (
 )
 
 // Janitor sweeps orphan (never verified) and unreferenced (repo_count = 0)
-// rows out of the objects table and deletes their stored objects. Multiple
-// lfsd instances can run concurrently: row selection uses FOR UPDATE SKIP
-// LOCKED so they never contend on the same rows.
+// objects.
 type Janitor struct {
 	db       *database.DB
 	storages []storage.Backend
 }
 
-// New constructs a Janitor that sweeps the given database and deletes stored
-// objects from any of the storages. Storages are deduplicated by scheme so a
-// single backend shared across multiple forges is only consulted once per
-// object.
+// New constructs a Janitor using the given list of storage backends.
 func New(db *database.DB, storages map[string]storage.Backend) *Janitor {
 	seen := make(map[string]struct{})
 	uniq := make([]storage.Backend, 0, len(storages))
@@ -80,11 +75,7 @@ func (j *Janitor) Sweep(ctx context.Context, logger *logx.Logger) {
 	}
 }
 
-// deleteObjects deletes the stored object for each object that was just
-// removed from the database. When object_uri is NULL (pending orphan that may
-// have been PUT via a presigned URL without the URI being recorded), every
-// distinct presigner is asked to delete the deterministic URI(oid). Delete is
-// idempotent.
+// deleteObjects deletes the given list of objects from the storage backends.
 func (j *Janitor) deleteObjects(ctx context.Context, logger *logx.Logger, objects []database.Object) {
 	logger.InfoContext(ctx, "Deleted objects", "count", len(objects))
 	for _, o := range objects {
