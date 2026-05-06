@@ -20,7 +20,7 @@ const (
 )
 
 // Janitor sweeps orphan (never verified) and unreferenced (repo_count = 0)
-// rows out of the objects table and deletes their storage blobs. Multiple
+// rows out of the objects table and deletes their stored objects. Multiple
 // lfsd instances can run concurrently: row selection uses FOR UPDATE SKIP
 // LOCKED so they never contend on the same rows.
 type Janitor struct {
@@ -28,9 +28,10 @@ type Janitor struct {
 	storages []storage.Backend
 }
 
-// New constructs a Janitor that sweeps the given database and deletes blobs
-// from any of the storages. Storages are deduplicated by scheme so a single
-// backend shared across multiple forges is only consulted once per object.
+// New constructs a Janitor that sweeps the given database and deletes stored
+// objects from any of the storages. Storages are deduplicated by scheme so a
+// single backend shared across multiple forges is only consulted once per
+// object.
 func New(db *database.DB, storages map[string]storage.Backend) *Janitor {
 	seen := make(map[string]struct{})
 	uniq := make([]storage.Backend, 0, len(storages))
@@ -69,28 +70,28 @@ func (j *Janitor) Sweep(ctx context.Context, logger *logx.Logger) {
 	if rows, err := j.db.SweepOrphanObjects(ctx, orphanAge, sweepBatchSize); err != nil {
 		logger.ErrorContext(ctx, "Failed to sweep orphan objects", "error", err)
 	} else if len(rows) > 0 {
-		j.deleteBlobs(ctx, logger.Scoped("orphan"), rows, true)
+		j.deleteObjects(ctx, logger.Scoped("orphan"), rows, true)
 	}
 
 	if rows, err := j.db.SweepUnreferencedObjects(ctx, sweepBatchSize); err != nil {
 		logger.ErrorContext(ctx, "Failed to sweep unreferenced objects", "error", err)
 	} else if len(rows) > 0 {
-		j.deleteBlobs(ctx, logger.Scoped("unreferenced"), rows, false)
+		j.deleteObjects(ctx, logger.Scoped("unreferenced"), rows, false)
 	}
 }
 
-// deleteBlobs deletes storage blobs for objects that were just removed from
-// the database. tryAllPresigners controls fallback behaviour for objects
+// deleteObjects deletes the stored object for each row that was just removed
+// from the database. tryAllPresigners controls fallback behaviour for objects
 // whose object_uri is NULL (pending/orphan objects that may have been written
 // to a presign backend without recording the URI). For unreferenced verified
 // objects, object_uri is always set so the fallback is unused.
-func (j *Janitor) deleteBlobs(ctx context.Context, logger *logx.Logger, rows []database.Object, tryAllPresigners bool) {
+func (j *Janitor) deleteObjects(ctx context.Context, logger *logx.Logger, rows []database.Object, tryAllPresigners bool) {
 	logger.InfoContext(ctx, "Deleted DB rows", "count", len(rows))
 	for _, r := range rows {
 		uri := ptrx.Deref(r.ObjectURI, "")
 		if uri != "" {
 			if err := j.deleteByURI(ctx, uri); err != nil {
-				logger.ErrorContext(ctx, "Failed to delete blob", "oid", r.OID, "uri", uri, "error", err)
+				logger.ErrorContext(ctx, "Failed to delete object", "oid", r.OID, "uri", uri, "error", err)
 			}
 			continue
 		}
@@ -107,7 +108,7 @@ func (j *Janitor) deleteBlobs(ctx context.Context, logger *logx.Logger, rows []d
 			}
 			presignURI := p.URI(r.OID)
 			if err := p.Delete(ctx, presignURI); err != nil {
-				logger.ErrorContext(ctx, "Failed to delete presign blob", "oid", r.OID, "scheme", b.Scheme(), "error", err)
+				logger.ErrorContext(ctx, "Failed to delete presign object", "oid", r.OID, "scheme", b.Scheme(), "error", err)
 			}
 		}
 	}

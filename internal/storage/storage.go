@@ -20,7 +20,7 @@ type Backend interface {
 	Type() Type
 	// Scheme returns the URI scheme prefix (including "://") that this backend
 	// owns. Janitor uses it to route a stored URI back to the backend that
-	// owns its blob.
+	// owns its object.
 	Scheme() string
 }
 

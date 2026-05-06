@@ -251,9 +251,9 @@ AND objects.verified_at IS NOT NULL`,
 // contend on the same rows.
 //
 // Returns the deleted rows so the caller can delete the corresponding storage
-// blobs. The DB delete and the row lock are held in a single transaction. Blob
-// delete happens after commit, so callers must tolerate a row whose blob
-// outlives the row by a few milliseconds.
+// objects. The DB delete and the row lock are held in a single transaction.
+// The storage delete happens after commit, so callers must tolerate a row
+// whose stored object outlives the row by a few milliseconds.
 func (d *DB) SweepOrphanObjects(ctx context.Context, orphanAge time.Duration, limit int) ([]Object, error) {
 	if limit <= 0 {
 		return nil, nil
