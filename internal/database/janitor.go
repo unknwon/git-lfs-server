@@ -64,14 +64,12 @@ FOR UPDATE SKIP LOCKED`,
 }
 
 // SweepUnreferencedObjects deletes up to limit verified objects whose
-// repo_count has dropped to zero and whose verified_at is older than grace.
-// The grace window keeps the janitor out of the way of in-flight cross-repo
-// dedup (LinkObject) on freshly verified rows.
+// repo_count has dropped to zero.
 //
 // Selection uses FOR UPDATE SKIP LOCKED. The link count is re-derived from
 // repo_objects inside the locked transaction so we never delete a row that
 // was relinked between the WHERE evaluation and the lock acquisition.
-func (d *DB) SweepUnreferencedObjects(ctx context.Context, grace time.Duration, limit int) ([]Object, error) {
+func (d *DB) SweepUnreferencedObjects(ctx context.Context, limit int) ([]Object, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
@@ -83,12 +81,10 @@ SELECT *
 FROM objects
 WHERE verified_at IS NOT NULL
   AND repo_count = 0
-  AND verified_at < now() - CAST(@grace AS interval)
 ORDER BY verified_at
 LIMIT @limit
 FOR UPDATE SKIP LOCKED`,
 			map[string]any{
-				"grace": formatPGInterval(grace),
 				"limit": limit,
 			},
 		).Scan(&candidates).Error; err != nil {
