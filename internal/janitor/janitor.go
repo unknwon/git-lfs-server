@@ -80,11 +80,11 @@ func (j *Janitor) Sweep(ctx context.Context, logger *logx.Logger) {
 	}
 }
 
-// deleteObjects deletes the stored object for each row that was just removed
-// from the database. tryAllPresigners controls fallback behaviour for objects
-// whose object_uri is NULL (pending/orphan objects that may have been written
-// to a presign backend without recording the URI). For unreferenced verified
-// objects, object_uri is always set so the fallback is unused.
+// deleteObjects deletes the stored object for each object that was just
+// removed from the database. tryAllPresigners controls fallback behaviour for
+// objects whose object_uri is NULL (pending/orphan objects that may have been
+// written to a presign backend without recording the URI). For unreferenced
+// verified objects, object_uri is always set so the fallback is unused.
 func (j *Janitor) deleteObjects(ctx context.Context, logger *logx.Logger, objects []database.Object, tryAllPresigners bool) {
 	logger.InfoContext(ctx, "Deleted objects", "count", len(objects))
 	for _, o := range objects {
