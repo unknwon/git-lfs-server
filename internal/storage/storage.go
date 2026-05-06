@@ -22,6 +22,8 @@ type Backend interface {
 	// owns. Janitor uses it to route a stored URI back to the backend that
 	// owns its object.
 	Scheme() string
+	// Delete removes the object at uri. Returns nil if already absent.
+	Delete(ctx context.Context, uri string) error
 }
 
 // Type identifies a storage backend implementation. The value matches the
@@ -45,8 +47,6 @@ type Proxier interface {
 	// Open returns a reader for the object at uri. Returns ErrNotFound if no
 	// object exists at uri. The caller closes.
 	Open(ctx context.Context, uri string) (io.ReadCloser, error)
-	// Delete removes the object at uri. Returns nil if already absent.
-	Delete(ctx context.Context, uri string) error
 }
 
 // Presigner is implemented by backends that validate SHA-256 server-side.
@@ -69,6 +69,4 @@ type Presigner interface {
 	PresignGet(ctx context.Context, uri string) (url string, err error)
 	// Head returns the object's size, or ErrNotFound if absent.
 	Head(ctx context.Context, uri string) (size int64, err error)
-	// Delete removes the object at uri. Returns nil if already absent.
-	Delete(ctx context.Context, uri string) error
 }

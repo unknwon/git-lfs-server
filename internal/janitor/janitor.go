@@ -70,22 +70,22 @@ func (j *Janitor) Sweep(ctx context.Context, logger *logx.Logger) {
 	if objects, err := j.db.SweepOrphanObjects(ctx, orphanAge, sweepBatchSize); err != nil {
 		logger.ErrorContext(ctx, "Failed to sweep orphan objects", "error", err)
 	} else if len(objects) > 0 {
-		j.deleteObjects(ctx, logger.Scoped("orphan"), objects, true)
+		j.deleteObjects(ctx, logger.Scoped("orphan"), objects)
 	}
 
 	if objects, err := j.db.SweepUnreferencedObjects(ctx, sweepBatchSize); err != nil {
 		logger.ErrorContext(ctx, "Failed to sweep unreferenced objects", "error", err)
 	} else if len(objects) > 0 {
-		j.deleteObjects(ctx, logger.Scoped("unreferenced"), objects, false)
+		j.deleteObjects(ctx, logger.Scoped("unreferenced"), objects)
 	}
 }
 
 // deleteObjects deletes the stored object for each object that was just
-// removed from the database. tryAllPresigners controls fallback behaviour for
-// objects whose object_uri is NULL (pending/orphan objects that may have been
-// written to a presign backend without recording the URI). For unreferenced
-// verified objects, object_uri is always set so the fallback is unused.
-func (j *Janitor) deleteObjects(ctx context.Context, logger *logx.Logger, objects []database.Object, tryAllPresigners bool) {
+// removed from the database. When object_uri is NULL (pending orphan that may
+// have been PUT via a presigned URL without the URI being recorded), every
+// distinct presigner is asked to delete the deterministic URI(oid). Delete is
+// idempotent.
+func (j *Janitor) deleteObjects(ctx context.Context, logger *logx.Logger, objects []database.Object) {
 	logger.InfoContext(ctx, "Deleted objects", "count", len(objects))
 	for _, o := range objects {
 		uri := ptrx.Deref(o.ObjectURI, "")
@@ -95,12 +95,6 @@ func (j *Janitor) deleteObjects(ctx context.Context, logger *logx.Logger, object
 			}
 			continue
 		}
-		if !tryAllPresigners {
-			continue
-		}
-		// Pending object with no recorded URI: the client may have PUT bytes via
-		// a presigned URL keyed by oid. We don't know which host's backend was
-		// used, so try every distinct presigner. Delete is idempotent.
 		for _, b := range j.storages {
 			p, ok := b.(storage.Presigner)
 			if !ok {
@@ -116,14 +110,8 @@ func (j *Janitor) deleteObjects(ctx context.Context, logger *logx.Logger, object
 
 func (j *Janitor) deleteByURI(ctx context.Context, uri string) error {
 	for _, b := range j.storages {
-		if !strings.HasPrefix(uri, b.Scheme()) {
-			continue
-		}
-		switch v := b.(type) {
-		case storage.Proxier:
-			return v.Delete(ctx, uri)
-		case storage.Presigner:
-			return v.Delete(ctx, uri)
+		if strings.HasPrefix(uri, b.Scheme()) {
+			return b.Delete(ctx, uri)
 		}
 	}
 	return errors.Newf("no backend for uri %q", uri)
