@@ -87,34 +87,34 @@ func serveBatch(db *database.DB, externalURL string, maxObjectSize int64) flameg
 
 		var req batchRequest
 		if err := json.NewDecoder(body).Decode(&req); err != nil {
-			writeBatchError(c, http.StatusBadRequest, fmt.Sprintf("invalid JSON body: %v", err))
+			writeLFSError(c.ResponseWriter(), http.StatusBadRequest, fmt.Sprintf("invalid JSON body: %v", err))
 			return
 		}
 
 		switch req.Operation {
 		case operationUpload:
 			if perm != forge.PermissionWrite {
-				writeBatchError(c, http.StatusForbidden, "write permission required for upload")
+				writeLFSError(c.ResponseWriter(), http.StatusForbidden, "write permission required for upload")
 				return
 			}
 		case operationDownload:
 			if perm != forge.PermissionRead && perm != forge.PermissionWrite {
-				writeBatchError(c, http.StatusForbidden, "read permission required for download")
+				writeLFSError(c.ResponseWriter(), http.StatusForbidden, "read permission required for download")
 				return
 			}
 		default:
-			writeBatchError(c, http.StatusBadRequest, `operation must be "upload" or "download"`)
+			writeLFSError(c.ResponseWriter(), http.StatusBadRequest, `operation must be "upload" or "download"`)
 			return
 		}
 
 		if len(req.Transfers) > 0 && !slices.Contains(req.Transfers, transferBasic) {
-			writeBatchError(c, http.StatusUnprocessableEntity, `only "basic" transfer is supported`)
+			writeLFSError(c.ResponseWriter(), http.StatusUnprocessableEntity, `only "basic" transfer is supported`)
 			return
 		}
 
 		for _, o := range req.Objects {
 			if !oidPattern.MatchString(o.OID) {
-				writeBatchError(c, http.StatusBadRequest, fmt.Sprintf("invalid oid %q", o.OID))
+				writeLFSError(c.ResponseWriter(), http.StatusBadRequest, fmt.Sprintf("invalid oid %q", o.OID))
 				return
 			}
 		}
@@ -143,7 +143,7 @@ func serveBatch(db *database.DB, externalURL string, maxObjectSize int64) flameg
 		}
 		if err != nil {
 			logger.ErrorContext(ctx, "Failed to look up objects", "error", err)
-			writeBatchError(c, http.StatusInternalServerError, "failed to process batch")
+			writeLFSError(c.ResponseWriter(), http.StatusInternalServerError, "failed to process batch")
 			return
 		}
 
@@ -216,30 +216,30 @@ func serveUpload(db *database.DB, storages map[string]storage.Backend, maxObject
 		ctx := c.Request().Context()
 
 		if perm != forge.PermissionWrite {
-			http.Error(c.ResponseWriter(), "write permission required for upload", http.StatusForbidden)
+			writeLFSError(c.ResponseWriter(), http.StatusForbidden, "write permission required for upload")
 			return
 		}
 
 		oid := c.Param("oid")
 		if !oidPattern.MatchString(oid) {
-			http.Error(c.ResponseWriter(), "invalid oid", http.StatusBadRequest)
+			writeLFSError(c.ResponseWriter(), http.StatusBadRequest, "invalid oid")
 			return
 		}
 
 		size := c.Request().ContentLength
 		if size < 0 {
-			http.Error(c.ResponseWriter(), "Content-Length is required", http.StatusLengthRequired)
+			writeLFSError(c.ResponseWriter(), http.StatusLengthRequired, "Content-Length is required")
 			return
 		}
 		if maxObjectSize > 0 && size > maxObjectSize {
-			http.Error(c.ResponseWriter(), fmt.Sprintf("object size %d exceeds limit %d", size, maxObjectSize), http.StatusRequestEntityTooLarge)
+			writeLFSError(c.ResponseWriter(), http.StatusRequestEntityTooLarge, fmt.Sprintf("object size %d exceeds limit %d", size, maxObjectSize))
 			return
 		}
 
 		backend, ok := storages[hostFromContext(c)]
 		if !ok {
 			logger.ErrorContext(ctx, "No storage backend configured for host")
-			http.Error(c.ResponseWriter(), http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			writeLFSError(c.ResponseWriter(), http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 			return
 		}
 
@@ -250,7 +250,7 @@ func serveUpload(db *database.DB, storages map[string]storage.Backend, maxObject
 			serveUploadPresign(c, logger, db, b, oid, size)
 		default:
 			logger.ErrorContext(ctx, "Storage backend does not implement a known transfer mode", "type", fmt.Sprintf("%T", backend))
-			http.Error(c.ResponseWriter(), http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			writeLFSError(c.ResponseWriter(), http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 		}
 	}
 }
@@ -269,12 +269,12 @@ func serveUploadProxy(c flamego.Context, logger *logx.Logger, db *database.DB, b
 		var hashErr *iox.SHA256MismatchError
 		switch {
 		case errors.As(err, &sizeErr):
-			http.Error(c.ResponseWriter(), sizeErr.Error(), http.StatusUnprocessableEntity)
+			writeLFSError(c.ResponseWriter(), http.StatusUnprocessableEntity, sizeErr.Error())
 		case errors.As(err, &hashErr):
-			http.Error(c.ResponseWriter(), hashErr.Error(), http.StatusUnprocessableEntity)
+			writeLFSError(c.ResponseWriter(), http.StatusUnprocessableEntity, hashErr.Error())
 		default:
 			logger.ErrorContext(ctx, "Failed to store object", "oid", oid, "error", err)
-			http.Error(c.ResponseWriter(), http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			writeLFSError(c.ResponseWriter(), http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 		}
 		return
 	}
@@ -283,7 +283,7 @@ func serveUploadProxy(c flamego.Context, logger *logx.Logger, db *database.DB, b
 	storedURI, err := db.LinkObject(ctx, repoName, oid, size, uri)
 	if err != nil {
 		logger.ErrorContext(ctx, "Failed to link object", "oid", oid, "error", err)
-		http.Error(c.ResponseWriter(), http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		writeLFSError(c.ResponseWriter(), http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 		return
 	}
 	if storedURI != uri {
@@ -301,7 +301,7 @@ func serveUploadPresign(c flamego.Context, logger *logx.Logger, db *database.DB,
 	existing, err := db.GetObjectByOID(ctx, oid)
 	if err != nil && !errors.Is(err, database.ErrObjectNotFound) {
 		logger.ErrorContext(ctx, "Failed to look up object", "oid", oid, "error", err)
-		http.Error(c.ResponseWriter(), http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		writeLFSError(c.ResponseWriter(), http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 		return
 	}
 	if existing != nil && existing.VerifiedAt != nil {
@@ -311,14 +311,14 @@ func serveUploadPresign(c flamego.Context, logger *logx.Logger, db *database.DB,
 
 	if err = db.InsertPendingObject(ctx, oid); err != nil {
 		logger.ErrorContext(ctx, "Failed to insert pending object", "oid", oid, "error", err)
-		http.Error(c.ResponseWriter(), http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		writeLFSError(c.ResponseWriter(), http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 		return
 	}
 
 	url, headers, err := backend.PresignPut(ctx, oid, size)
 	if err != nil {
 		logger.ErrorContext(ctx, "Failed to presign upload", "oid", oid, "error", err)
-		http.Error(c.ResponseWriter(), http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		writeLFSError(c.ResponseWriter(), http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 		return
 	}
 
@@ -336,20 +336,20 @@ func serveDownload(db *database.DB, storages map[string]storage.Backend) flamego
 		ctx := c.Request().Context()
 
 		if perm != forge.PermissionRead && perm != forge.PermissionWrite {
-			http.Error(c.ResponseWriter(), "read permission required for download", http.StatusForbidden)
+			writeLFSError(c.ResponseWriter(), http.StatusForbidden, "read permission required for download")
 			return
 		}
 
 		oid := c.Param("oid")
 		if !oidPattern.MatchString(oid) {
-			http.Error(c.ResponseWriter(), "invalid oid", http.StatusBadRequest)
+			writeLFSError(c.ResponseWriter(), http.StatusBadRequest, "invalid oid")
 			return
 		}
 
 		backend, ok := storages[hostFromContext(c)]
 		if !ok {
 			logger.ErrorContext(ctx, "No storage backend configured for host")
-			http.Error(c.ResponseWriter(), http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			writeLFSError(c.ResponseWriter(), http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 			return
 		}
 
@@ -357,11 +357,11 @@ func serveDownload(db *database.DB, storages map[string]storage.Backend) flamego
 		object, err := db.GetRepoObjectByOID(ctx, repoName, oid)
 		if err != nil {
 			if errors.Is(err, database.ErrObjectNotFound) {
-				http.Error(c.ResponseWriter(), "object does not exist", http.StatusNotFound)
+				writeLFSError(c.ResponseWriter(), http.StatusNotFound, "object does not exist")
 				return
 			}
 			logger.ErrorContext(ctx, "Failed to look up object", "oid", oid, "error", err)
-			http.Error(c.ResponseWriter(), http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			writeLFSError(c.ResponseWriter(), http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 			return
 		}
 		// GetRepoObjectByOID filters verified rows, so Size and ObjectURI are
@@ -370,7 +370,7 @@ func serveDownload(db *database.DB, storages map[string]storage.Backend) flamego
 		objectSize := ptrx.Deref(object.Size, -1)
 		if objectURI == "" || objectSize < 0 {
 			logger.ErrorContext(ctx, "Verified object has nil size or uri (schema violation)", "oid", oid)
-			http.Error(c.ResponseWriter(), http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			writeLFSError(c.ResponseWriter(), http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 			return
 		}
 
@@ -381,7 +381,7 @@ func serveDownload(db *database.DB, storages map[string]storage.Backend) flamego
 			serveDownloadPresign(c, logger, b, oid, objectURI)
 		default:
 			logger.ErrorContext(ctx, "Storage backend does not implement a known transfer mode", "type", fmt.Sprintf("%T", backend))
-			http.Error(c.ResponseWriter(), http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			writeLFSError(c.ResponseWriter(), http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 		}
 	}
 }
@@ -396,7 +396,7 @@ func serveDownloadProxy(c flamego.Context, logger *logx.Logger, backend storage.
 		} else {
 			logger.ErrorContext(ctx, "Failed to open object", "oid", oid, "error", err)
 		}
-		http.Error(c.ResponseWriter(), http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		writeLFSError(c.ResponseWriter(), http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 		return
 	}
 	defer func() { _ = rc.Close() }()
@@ -416,7 +416,7 @@ func serveDownloadPresign(c flamego.Context, logger *logx.Logger, backend storag
 	url, err := backend.PresignGet(ctx, uri)
 	if err != nil {
 		logger.ErrorContext(ctx, "Failed to presign download", "oid", oid, "error", err)
-		http.Error(c.ResponseWriter(), http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		writeLFSError(c.ResponseWriter(), http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 		return
 	}
 
@@ -431,7 +431,7 @@ func serveVerify(db *database.DB, storages map[string]storage.Backend) flamego.H
 		ctx := c.Request().Context()
 
 		if perm != forge.PermissionWrite {
-			http.Error(c.ResponseWriter(), "write permission required for verify", http.StatusForbidden)
+			writeLFSError(c.ResponseWriter(), http.StatusForbidden, "write permission required for verify")
 			return
 		}
 
@@ -440,18 +440,18 @@ func serveVerify(db *database.DB, storages map[string]storage.Backend) flamego.H
 
 		var req verifyRequest
 		if err := json.NewDecoder(body).Decode(&req); err != nil {
-			http.Error(c.ResponseWriter(), fmt.Sprintf("invalid JSON body: %v", err), http.StatusBadRequest)
+			writeLFSError(c.ResponseWriter(), http.StatusBadRequest, fmt.Sprintf("invalid JSON body: %v", err))
 			return
 		}
 		if !oidPattern.MatchString(req.OID) {
-			http.Error(c.ResponseWriter(), "invalid oid", http.StatusBadRequest)
+			writeLFSError(c.ResponseWriter(), http.StatusBadRequest, "invalid oid")
 			return
 		}
 
 		backend, ok := storages[hostFromContext(c)]
 		if !ok {
 			logger.ErrorContext(ctx, "No storage backend configured for host")
-			http.Error(c.ResponseWriter(), http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			writeLFSError(c.ResponseWriter(), http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 			return
 		}
 
@@ -462,7 +462,7 @@ func serveVerify(db *database.DB, storages map[string]storage.Backend) flamego.H
 			serveVerifyPresign(c, logger, db, b, req)
 		default:
 			logger.ErrorContext(ctx, "Storage backend does not implement a known transfer mode", "type", fmt.Sprintf("%T", backend))
-			http.Error(c.ResponseWriter(), http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			writeLFSError(c.ResponseWriter(), http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 		}
 	}
 }
@@ -474,15 +474,15 @@ func serveVerifyProxy(c flamego.Context, logger *logx.Logger, db *database.DB, r
 	object, err := db.GetRepoObjectByOID(ctx, repoName, req.OID)
 	if err != nil {
 		if errors.Is(err, database.ErrObjectNotFound) {
-			http.Error(c.ResponseWriter(), "object does not exist", http.StatusNotFound)
+			writeLFSError(c.ResponseWriter(), http.StatusNotFound, "object does not exist")
 			return
 		}
 		logger.ErrorContext(ctx, "Failed to look up object", "oid", req.OID, "error", err)
-		http.Error(c.ResponseWriter(), http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		writeLFSError(c.ResponseWriter(), http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 		return
 	}
 	if ptrx.Deref(object.Size, -1) != req.Size {
-		http.Error(c.ResponseWriter(), "size mismatch", http.StatusUnprocessableEntity)
+		writeLFSError(c.ResponseWriter(), http.StatusUnprocessableEntity, "size mismatch")
 		return
 	}
 
@@ -496,17 +496,17 @@ func serveVerifyPresign(c flamego.Context, logger *logx.Logger, db *database.DB,
 	headSize, err := backend.Head(ctx, uri)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
-			http.Error(c.ResponseWriter(), "object does not exist in storage", http.StatusUnprocessableEntity)
+			writeLFSError(c.ResponseWriter(), http.StatusUnprocessableEntity, "object does not exist in storage")
 			return
 		}
 		logger.ErrorContext(ctx, "Failed to head object", "oid", req.OID, "error", err)
-		http.Error(c.ResponseWriter(), http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		writeLFSError(c.ResponseWriter(), http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 		return
 	}
 	// R2's signed Content-Length should make this impossible, but treat any
 	// mismatch as a hard error rather than trusting either side.
 	if headSize != req.Size {
-		http.Error(c.ResponseWriter(), "size mismatch", http.StatusUnprocessableEntity)
+		writeLFSError(c.ResponseWriter(), http.StatusUnprocessableEntity, "size mismatch")
 		return
 	}
 
@@ -514,7 +514,7 @@ func serveVerifyPresign(c flamego.Context, logger *logx.Logger, db *database.DB,
 	storedURI, err := db.VerifyObject(ctx, repoName, req.OID, req.Size, uri)
 	if err != nil {
 		logger.ErrorContext(ctx, "Failed to mark object verified", "oid", req.OID, "error", err)
-		http.Error(c.ResponseWriter(), http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		writeLFSError(c.ResponseWriter(), http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 		return
 	}
 	if storedURI != uri {
@@ -534,8 +534,14 @@ func verifyHref(externalURL, repoName string) string {
 	return fmt.Sprintf("%s/%s/info/lfs/objects/verify", externalURL, repoName)
 }
 
-func writeBatchError(c flamego.Context, code int, msg string) {
-	c.ResponseWriter().Header().Set("Content-Type", mediaTypeLFS)
-	c.ResponseWriter().WriteHeader(code)
-	_ = json.NewEncoder(c.ResponseWriter()).Encode(map[string]string{"message": msg})
+// writeLFSError writes an error response in the format required by the LFS
+// Batch API spec: a JSON body of {"message": "..."} with the
+// application/vnd.git-lfs+json content type. All LFS endpoints (batch, upload,
+// download, verify, and the auth middleware that fronts them) must use this
+// helper instead of http.Error so clients get a parseable body and the right
+// content type on every error.
+func writeLFSError(w http.ResponseWriter, code int, msg string) {
+	w.Header().Set("Content-Type", mediaTypeLFS)
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(map[string]string{"message": msg})
 }
