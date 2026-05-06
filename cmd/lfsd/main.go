@@ -90,7 +90,7 @@ func main() {
 		}
 	})
 	routines.Go(func() {
-		janitor.New(db, config.Storages, config.Janitor).Run(ctx, logger.Scoped("janitor"))
+		janitor.New(db, config.Storages).Run(ctx, logger.Scoped("janitor"))
 	})
 
 	logger.InfoContext(ctx, "Server ready",
