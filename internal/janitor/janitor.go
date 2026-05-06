@@ -67,16 +67,16 @@ func (j *Janitor) Run(ctx context.Context, logger *logx.Logger) {
 // Sweep runs both cleanup passes once. Errors are logged but not returned.
 // The next tick will retry.
 func (j *Janitor) Sweep(ctx context.Context, logger *logx.Logger) {
-	if rows, err := j.db.SweepOrphanObjects(ctx, orphanAge, sweepBatchSize); err != nil {
+	if objects, err := j.db.SweepOrphanObjects(ctx, orphanAge, sweepBatchSize); err != nil {
 		logger.ErrorContext(ctx, "Failed to sweep orphan objects", "error", err)
-	} else if len(rows) > 0 {
-		j.deleteObjects(ctx, logger.Scoped("orphan"), rows, true)
+	} else if len(objects) > 0 {
+		j.deleteObjects(ctx, logger.Scoped("orphan"), objects, true)
 	}
 
-	if rows, err := j.db.SweepUnreferencedObjects(ctx, sweepBatchSize); err != nil {
+	if objects, err := j.db.SweepUnreferencedObjects(ctx, sweepBatchSize); err != nil {
 		logger.ErrorContext(ctx, "Failed to sweep unreferenced objects", "error", err)
-	} else if len(rows) > 0 {
-		j.deleteObjects(ctx, logger.Scoped("unreferenced"), rows, false)
+	} else if len(objects) > 0 {
+		j.deleteObjects(ctx, logger.Scoped("unreferenced"), objects, false)
 	}
 }
 
@@ -85,20 +85,20 @@ func (j *Janitor) Sweep(ctx context.Context, logger *logx.Logger) {
 // whose object_uri is NULL (pending/orphan objects that may have been written
 // to a presign backend without recording the URI). For unreferenced verified
 // objects, object_uri is always set so the fallback is unused.
-func (j *Janitor) deleteObjects(ctx context.Context, logger *logx.Logger, rows []database.Object, tryAllPresigners bool) {
-	logger.InfoContext(ctx, "Deleted DB rows", "count", len(rows))
-	for _, r := range rows {
-		uri := ptrx.Deref(r.ObjectURI, "")
+func (j *Janitor) deleteObjects(ctx context.Context, logger *logx.Logger, objects []database.Object, tryAllPresigners bool) {
+	logger.InfoContext(ctx, "Deleted objects", "count", len(objects))
+	for _, o := range objects {
+		uri := ptrx.Deref(o.ObjectURI, "")
 		if uri != "" {
 			if err := j.deleteByURI(ctx, uri); err != nil {
-				logger.ErrorContext(ctx, "Failed to delete object", "oid", r.OID, "uri", uri, "error", err)
+				logger.ErrorContext(ctx, "Failed to delete object", "oid", o.OID, "uri", uri, "error", err)
 			}
 			continue
 		}
 		if !tryAllPresigners {
 			continue
 		}
-		// Pending row with no recorded URI: the client may have PUT bytes via
+		// Pending object with no recorded URI: the client may have PUT bytes via
 		// a presigned URL keyed by oid. We don't know which host's backend was
 		// used, so try every distinct presigner. Delete is idempotent.
 		for _, b := range j.storages {
@@ -106,9 +106,9 @@ func (j *Janitor) deleteObjects(ctx context.Context, logger *logx.Logger, rows [
 			if !ok {
 				continue
 			}
-			presignURI := p.URI(r.OID)
+			presignURI := p.URI(o.OID)
 			if err := p.Delete(ctx, presignURI); err != nil {
-				logger.ErrorContext(ctx, "Failed to delete presign object", "oid", r.OID, "scheme", b.Scheme(), "error", err)
+				logger.ErrorContext(ctx, "Failed to delete presign object", "oid", o.OID, "scheme", b.Scheme(), "error", err)
 			}
 		}
 	}
