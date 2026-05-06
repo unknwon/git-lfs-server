@@ -40,9 +40,8 @@ func New(db *database.DB, storages map[string]storage.Backend) *Janitor {
 	return &Janitor{db: db, storages: uniq}
 }
 
-// Run blocks until ctx is cancelled, sweeping on the configured interval. The
-// first tick fires after one interval; if startup-time cleanup is desired,
-// callers can invoke Sweep directly before Run.
+// Run blocks until ctx is canceled, sweeping on the configured interval. The
+// first tick fires after one interval.
 func (j *Janitor) Run(ctx context.Context, logger *logx.Logger) {
 	logger.InfoContext(ctx, "Janitor started")
 
@@ -77,15 +76,19 @@ func (j *Janitor) Sweep(ctx context.Context, logger *logx.Logger) {
 
 // deleteObjects deletes the given list of objects from the storage backends.
 func (j *Janitor) deleteObjects(ctx context.Context, logger *logx.Logger, objects []database.Object) {
-	logger.InfoContext(ctx, "Deleted objects", "count", len(objects))
+	var deletedCount, failedCount int
 	for _, o := range objects {
 		uri := ptrx.Deref(o.ObjectURI, "")
 		if uri != "" {
 			if err := j.deleteByURI(ctx, uri); err != nil {
 				logger.ErrorContext(ctx, "Failed to delete object", "oid", o.OID, "uri", uri, "error", err)
+				failedCount++
+			} else {
+				deletedCount++
 			}
 			continue
 		}
+		failed := false
 		for _, b := range j.storages {
 			p, ok := b.(storage.Presigner)
 			if !ok {
@@ -94,9 +97,20 @@ func (j *Janitor) deleteObjects(ctx context.Context, logger *logx.Logger, object
 			presignURI := p.URI(o.OID)
 			if err := p.Delete(ctx, presignURI); err != nil {
 				logger.ErrorContext(ctx, "Failed to delete presign object", "oid", o.OID, "scheme", b.Scheme(), "error", err)
+				failed = true
 			}
 		}
+		if failed {
+			failedCount++
+		} else {
+			deletedCount++
+		}
 	}
+	logFn := logger.InfoContext
+	if failedCount > 0 {
+		logFn = logger.ErrorContext
+	}
+	logFn(ctx, "Swept objects", "deletedCount", deletedCount, "failedCount", failedCount)
 }
 
 func (j *Janitor) deleteByURI(ctx context.Context, uri string) error {

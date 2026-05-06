@@ -19,8 +19,7 @@ type Backend interface {
 	// [storage "{name}"] config section.
 	Type() Type
 	// Scheme returns the URI scheme prefix (including "://") that this backend
-	// owns. Janitor uses it to route a stored URI back to the backend that
-	// owns its object.
+	// owns.
 	Scheme() string
 	// Delete removes the object at uri. Returns nil if already absent.
 	Delete(ctx context.Context, uri string) error
