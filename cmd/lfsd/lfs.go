@@ -161,7 +161,7 @@ func serveBatch(db *database.DB, externalURL string, maxObjectSize int64) flameg
 				case !ok:
 					respObj.Error = &batchObjectError{Code: http.StatusNotFound, Message: "object does not exist"}
 				case ptrx.Deref(obj.Size, -1) != in.Size:
-					respObj.Error = &batchObjectError{Code: http.StatusUnprocessableEntity, Message: "size mismatch"}
+					respObj.Error = &batchObjectError{Code: http.StatusUnprocessableEntity, Message: "OID exists with different size"}
 				default:
 					respObj.Actions = map[string]batchAction{
 						"download": {Href: objectHref(externalURL, repoName, in.OID), Header: authHeader},
@@ -292,7 +292,7 @@ func serveUploadProxy(c flamego.Context, logger *logx.Logger, db *database.DB, b
 		}
 	}
 
-	c.ResponseWriter().WriteHeader(http.StatusOK)
+	c.ResponseWriter().WriteHeader(http.StatusNoContent)
 }
 
 func serveUploadPresign(c flamego.Context, logger *logx.Logger, db *database.DB, backend storage.Presigner, oid string, size int64) {
@@ -309,7 +309,7 @@ func serveUploadPresign(c flamego.Context, logger *logx.Logger, db *database.DB,
 		return
 	}
 
-	if err := db.InsertPendingObject(ctx, oid); err != nil {
+	if err = db.InsertPendingObject(ctx, oid); err != nil {
 		logger.ErrorContext(ctx, "Failed to insert pending object", "oid", oid, "error", err)
 		http.Error(c.ResponseWriter(), http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
@@ -405,8 +405,7 @@ func serveDownloadProxy(c flamego.Context, logger *logx.Logger, backend storage.
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 	w.WriteHeader(http.StatusOK)
-
-	if _, err := io.Copy(w, rc); err != nil {
+	if _, err = io.Copy(w, rc); err != nil {
 		logger.ErrorContext(ctx, "Failed to stream object", "oid", oid, "error", err)
 	}
 }
