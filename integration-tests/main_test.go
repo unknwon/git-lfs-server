@@ -1,6 +1,6 @@
 //go:build !windows
 
-package integration_tests
+package main
 
 import (
 	"context"
