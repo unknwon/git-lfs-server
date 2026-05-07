@@ -116,7 +116,7 @@ WHERE id = @id`,
 		return nil
 	})
 	if err != nil {
-		return "", err
+		return "", errors.Wrap(err, "link object")
 	}
 	return storedURI, nil
 }
@@ -190,7 +190,7 @@ WHERE id = @id`,
 		return nil
 	})
 	if err != nil {
-		return "", err
+		return "", errors.Wrap(err, "verify object")
 	}
 	return storedURI, nil
 }
@@ -293,7 +293,7 @@ FOR UPDATE SKIP LOCKED`,
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "sweep orphan objects")
 	}
 	return deleted, nil
 }
@@ -301,9 +301,10 @@ FOR UPDATE SKIP LOCKED`,
 // SweepUnreferencedObjects deletes up to limit verified objects whose
 // repo_count has dropped to zero.
 //
-// Selection uses FOR UPDATE SKIP LOCKED. The link count is re-derived from
-// repo_objects inside the locked transaction so we never delete a row that
-// was relinked between the WHERE evaluation and the lock acquisition.
+// Selection uses FOR UPDATE SKIP LOCKED. LinkObject's upsert takes the same
+// row lock before touching repo_objects, so a relink that started before our
+// lock will have committed (and bumped repo_count off zero) before we acquire,
+// and a relink that starts after will block on our lock until we commit.
 func (d *DB) SweepUnreferencedObjects(ctx context.Context, limit int) ([]Object, error) {
 	if limit <= 0 {
 		return nil, nil
@@ -328,27 +329,9 @@ FOR UPDATE SKIP LOCKED`,
 		if len(candidates) == 0 {
 			return nil
 		}
-
-		// repo_count is a denormalised cache. Re-derive the live link count
-		// from repo_objects under the row lock so we never delete a row that
-		// LinkObject relinked between the WHERE evaluation and the lock
-		// acquisition.
-		ids := make([]int64, 0, len(candidates))
-		for _, c := range candidates {
-			var live int64
-			if err := tx.Raw(
-				`SELECT COUNT(*) FROM repo_objects WHERE object_id = @id`,
-				map[string]any{"id": c.ID},
-			).Scan(&live).Error; err != nil {
-				return errors.Wrap(err, "recount repo_objects")
-			}
-			if live == 0 {
-				ids = append(ids, c.ID)
-				deleted = append(deleted, c)
-			}
-		}
-		if len(ids) == 0 {
-			return nil
+		ids := make([]int64, len(candidates))
+		for i, c := range candidates {
+			ids[i] = c.ID
 		}
 		if err := tx.Exec(
 			`DELETE FROM objects WHERE id = ANY(@ids)`,
@@ -356,10 +339,11 @@ FOR UPDATE SKIP LOCKED`,
 		).Error; err != nil {
 			return errors.Wrap(err, "delete unreferenced objects")
 		}
+		deleted = candidates
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "sweep unreferenced objects")
 	}
 	return deleted, nil
 }

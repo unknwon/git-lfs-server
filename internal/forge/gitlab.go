@@ -36,7 +36,7 @@ func NewGitLabProvider(host string, allowlist *RepoAllowlist) *GitLabProvider {
 func (p *GitLabProvider) Authorize(ctx context.Context, logger *logx.Logger, repo, username, token string) (Permission, time.Duration, error) {
 	allowed, err := p.allowGitService(ctx, repo, username, token, "git-receive-pack")
 	if err != nil {
-		return "", -1, err
+		return "", -1, errors.Wrap(err, "check git-receive-pack permission")
 	}
 	if allowed {
 		return PermissionWrite, 0, nil
@@ -44,7 +44,7 @@ func (p *GitLabProvider) Authorize(ctx context.Context, logger *logx.Logger, rep
 
 	allowed, err = p.allowGitService(ctx, repo, username, token, "git-upload-pack")
 	if err != nil {
-		return "", -1, err
+		return "", -1, errors.Wrap(err, "check git-upload-pack permission")
 	}
 	if allowed {
 		return PermissionRead, 0, nil
