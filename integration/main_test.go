@@ -81,7 +81,7 @@ func TestUploadDownloadRoundtrip(t *testing.T) {
 	git("config", "user.name", "ci")
 	git("config", "lfs.url", lfsURL)
 	git("add", ".")
-	git("commit", "-q", "-m", run.Arg("e2e fixture"))
+	git("commit", "-q", "-m", "e2e fixture")
 	git("remote", "add", "origin", remoteURL)
 	git("push", "origin", "HEAD:refs/heads/"+branch)
 
@@ -131,7 +131,9 @@ func setupLfsd(ctx context.Context, t *testing.T) func() {
 	stream, err := streamexec.Start(cmd, streamexec.Combined)
 	require.NoError(t, err, "start lfsd")
 
+	streamDone := make(chan struct{})
 	go func() {
+		defer close(streamDone)
 		err := stream.Stream(func(line string) {
 			t.Logf("[lfsd] %s", line)
 		})
@@ -146,6 +148,9 @@ func setupLfsd(ctx context.Context, t *testing.T) func() {
 		if cmd.Process != nil {
 			killProcessGroup(cmd.Process.Pid)
 		}
+		// Wait for the streaming goroutine to drain before returning so it never
+		// calls t.Logf after the test completes.
+		<-streamDone
 	}
 }
 
@@ -192,7 +197,12 @@ func gitCmd(ctx context.Context, t *testing.T, dir string) func(args ...string) 
 	t.Helper()
 	return func(args ...string) {
 		t.Helper()
-		parts := append([]string{"git"}, args...)
+		// run.Cmd joins parts with spaces and re-shell-splits, so any arg with
+		// whitespace or shell metacharacters must be shell-quoted via run.Arg.
+		parts := []string{"git"}
+		for _, a := range args {
+			parts = append(parts, run.Arg(a))
+		}
 		err := run.Cmd(ctx, parts...).
 			Dir(dir).
 			Environ([]string{"GIT_TERMINAL_PROMPT=0"}).
