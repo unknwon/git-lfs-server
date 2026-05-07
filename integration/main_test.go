@@ -52,6 +52,8 @@ func TestUploadDownloadRoundtrip(t *testing.T) {
 	pat := os.Getenv("GIT_LFS_TEST_PAT")
 	remoteURL := fmt.Sprintf(
 		"https://x-access-token:%s@github.com/unknwon/git-lfs-test.git", pat)
+	// Set lfs.url in local git config (not .lfsconfig) so the PAT never lands in a
+	// committed file. GitHub push protection rejects pushes that contain a PAT.
 	lfsURL := fmt.Sprintf(
 		"http://x-access-token:%s@127.0.0.1:3356/github.com/unknwon/git-lfs-test/info/lfs",
 		pat)
@@ -71,14 +73,13 @@ func TestUploadDownloadRoundtrip(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(pushDir, "large.bin"), blob, 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(pushDir, ".gitattributes"),
 		[]byte("*.bin filter=lfs diff=lfs merge=lfs -text\n"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(pushDir, ".lfsconfig"),
-		[]byte(fmt.Sprintf("[lfs]\n\turl = %s\n", lfsURL)), 0o644))
 
 	git := gitCmd(ctx, t, pushDir)
 	git("init", "-q", "-b", branch)
 	git("lfs", "install", "--local")
 	git("config", "user.email", "ci@example.com")
 	git("config", "user.name", "ci")
+	git("config", "lfs.url", lfsURL)
 	git("add", ".")
 	git("commit", "-q", "-m", run.Arg("e2e fixture"))
 	git("remote", "add", "origin", remoteURL)
@@ -91,7 +92,9 @@ func TestUploadDownloadRoundtrip(t *testing.T) {
 		run.Cmd(ctx, "git", "clone", "--branch", branch, "--depth", "1", remoteURL, pullDir).
 			Environ([]string{"GIT_LFS_SKIP_SMUDGE=1", "GIT_TERMINAL_PROMPT=0"}).Run().Wait())
 
-	gitCmd(ctx, t, pullDir)("lfs", "pull")
+	pullGit := gitCmd(ctx, t, pullDir)
+	pullGit("config", "lfs.url", lfsURL)
+	pullGit("lfs", "pull")
 
 	got, err := os.ReadFile(filepath.Join(pullDir, "large.bin"))
 	require.NoError(t, err)
