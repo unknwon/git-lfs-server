@@ -1,0 +1,70 @@
+name: Integration
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'integration/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/integration.yml'
+  pull_request:
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'integration/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/integration.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: End-to-end
+    # Skip PRs from forks: secrets aren't available, the run would fail anyway,
+    # and we don't want fork PRs pushing to unknwon/git-lfs-test.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: lfsd
+          POSTGRES_PASSWORD: ${{ secrets.LFSD_DATABASE_PASSWORD }}
+          POSTGRES_DB: lfsd
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lfsd"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      LFSD_DATABASE_PASSWORD: ${{ secrets.LFSD_DATABASE_PASSWORD }}
+      LFSD_R2_ACCOUNT_ID: ${{ secrets.LFSD_R2_ACCOUNT_ID }}
+      LFSD_R2_BUCKET: ${{ secrets.LFSD_R2_BUCKET }}
+      LFSD_R2_ACCESS_KEY_ID: ${{ secrets.LFSD_R2_ACCESS_KEY_ID }}
+      LFSD_R2_SECRET_ACCESS_KEY: ${{ secrets.LFSD_R2_SECRET_ACCESS_KEY }}
+      GIT_LFS_TEST_PAT: ${{ secrets.GIT_LFS_TEST_PAT }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+      - name: Install Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version: 1.26.x
+      - name: Verify git and git-lfs
+        run: |
+          git --version
+          git lfs version
+      - name: Run integration test
+        run: go test -long -v -timeout 10m ./integration/...
