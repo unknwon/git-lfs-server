@@ -27,8 +27,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  e2e:
-    name: End-to-end
+  test:
+    name: Test
     # Skip PRs from forks: secrets aren't available, the run would fail anyway,
     # and we don't want fork PRs pushing to unknwon/git-lfs-test.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
@@ -66,5 +66,5 @@ jobs:
         run: |
           git --version
           git lfs version
-      - name: Run integration test
-        run: go test -long -v -timeout 10m ./integration/...
+      - name: Run tests
+        run: go test ./integration -v -long
