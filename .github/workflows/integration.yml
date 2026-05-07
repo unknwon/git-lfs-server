@@ -6,7 +6,7 @@ on:
     paths:
       - 'cmd/**'
       - 'internal/**'
-      - 'integration/**'
+      - 'integration-tests/**'
       - 'go.mod'
       - 'go.sum'
       - '.github/workflows/integration.yml'
@@ -14,7 +14,7 @@ on:
     paths:
       - 'cmd/**'
       - 'internal/**'
-      - 'integration/**'
+      - 'integration-tests/**'
       - 'go.mod'
       - 'go.sum'
       - '.github/workflows/integration.yml'
@@ -23,7 +23,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: integration-${{ github.ref }}
+  group: integration-tests-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -69,4 +69,4 @@ jobs:
           git --version
           git lfs version
       - name: Run tests
-        run: go test ./integration -v -long
+        run: go test ./integration-tests -v -long

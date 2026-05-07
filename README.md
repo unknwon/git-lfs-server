@@ -6,13 +6,13 @@ Bring Your Own Forge (BYOF) Git LFS server with affordable storage.
 
 Assuming 1 TiB is uploaded and stored for a full month, and 3 TiB is downloaded in the same month:
 
-| Provider | Storage | Egress | Yearly total | Savings vs. GitLab LFS |
-| --- | ---: | ---: | ---: | ---: |
-| GitLab LFS | 109 x 10 GB-month x $5 x 12 = $6,540.00 | Included | $6,540.00 | Baseline |
-| GitHub LFS | 1,014 GiB x $0.07 x 12 = $851.76 | 36,744 GiB x $0.0875 = $3,215.10 | $4,066.86 | $2,473.14 (37.81%) |
-| DigitalOcean Spaces | ($5 + 774 GiB x $0.02) x 12 = $245.76 | 24,576 GiB x $0.01 = $245.76 | $491.52 | $6,048.48 (92.48%) |
-| Cloudflare R2 Standard | 1,090 GB-month x $0.015 x 12 = $196.20 | Included | $196.20 | $6,343.80 (97.00%) |
-| Backblaze B2 | 1 TB x $6.95 x 12 = $83.40 | Free up to 3x storage | $83.40 | $6,456.60 (98.72%) |
+| Provider               |                                 Storage |                           Egress | Yearly total | Savings vs. GitLab LFS |
+|------------------------|----------------------------------------:|---------------------------------:|-------------:|-----------------------:|
+| GitLab LFS             | 109 x 10 GB-month x $5 x 12 = $6,540.00 |                         Included |    $6,540.00 |               Baseline |
+| GitHub LFS             |        1,014 GiB x $0.07 x 12 = $851.76 | 36,744 GiB x $0.0875 = $3,215.10 |    $4,066.86 |     $2,473.14 (37.81%) |
+| DigitalOcean Spaces    |   ($5 + 774 GiB x $0.02) x 12 = $245.76 |     24,576 GiB x $0.01 = $245.76 |      $491.52 |     $6,048.48 (92.48%) |
+| Cloudflare R2 Standard |  1,090 GB-month x $0.015 x 12 = $196.20 |                         Included |      $196.20 |     $6,343.80 (97.00%) |
+| Backblaze B2           |              1 TB x $6.95 x 12 = $83.40 |            Free up to 3x storage |       $83.40 |     $6,456.60 (98.72%) |
 
 ## Example setup
 
@@ -37,11 +37,10 @@ STORAGE = r2
 [storage "r2"]
 TYPE = s3-presign
 SCHEME = r2://
-ACCOUNT_ID = ${LFSD_R2_ACCOUNT_ID}
 BUCKET = lfs-objects
 ACCESS_KEY_ID = ${LFSD_R2_ACCESS_KEY_ID}
 SECRET_ACCESS_KEY = ${LFSD_R2_SECRET_ACCESS_KEY}
-ENDPOINT = https://%(ACCOUNT_ID)s.r2.cloudflarestorage.com
+ENDPOINT = https://${LFSD_R2_ACCOUNT_ID}.r2.cloudflarestorage.com
 ```
 
 `EXTERNAL_URL` is the public origin clients reach the server at. It is used as the base for the object download, upload, and verify URLs the server returns to the client, so it must match what the client sees (typically the public HTTPS URL terminated by your reverse proxy).
