@@ -80,7 +80,7 @@ func TestUploadDownloadRoundtrip(t *testing.T) {
 	git("config", "user.email", "ci@example.com")
 	git("config", "user.name", "ci")
 	git("add", ".")
-	git("commit", "-q", "-m", "e2e fixture")
+	git("commit", "-q", "-m", run.Arg("e2e fixture"))
 	git("remote", "add", "origin", remoteURL)
 	git("push", "origin", "HEAD:refs/heads/"+branch)
 
