@@ -25,26 +25,26 @@ func authorize(forges map[string]forge.Provider) flamego.Handler {
 		host := hostFromContext(c)
 		provider, ok := forges[host]
 		if !ok {
-			http.Error(c.ResponseWriter(), "unsupported forge host", http.StatusBadRequest)
+			writeLFSError(c.ResponseWriter(), http.StatusBadRequest, "unsupported forge host")
 			return
 		}
 
 		username, token, ok := c.Request().BasicAuth()
 		if !ok || token == "" {
 			c.ResponseWriter().Header().Set("WWW-Authenticate", `Basic realm="git-lfs"`)
-			http.Error(c.ResponseWriter(), "basic auth credentials are required", http.StatusUnauthorized)
+			writeLFSError(c.ResponseWriter(), http.StatusUnauthorized, "basic auth credentials are required")
 			return
 		}
 
 		repo := strings.ToLower(c.Param("**"))
 		if repo == "" {
-			http.Error(c.ResponseWriter(), "repository path is missing", http.StatusBadRequest)
+			writeLFSError(c.ResponseWriter(), http.StatusBadRequest, "repository path is missing")
 			return
 		}
 
 		if !provider.Allow(repo) {
 			logger.InfoContext(ctx, "Repository rejected by allowlist", "host", host, "repo", repo)
-			http.Error(c.ResponseWriter(), "repository is not in the allowlist", http.StatusForbidden)
+			writeLFSError(c.ResponseWriter(), http.StatusForbidden, "repository is not in the allowlist")
 			return
 		}
 
@@ -62,10 +62,10 @@ func authorize(forges map[string]forge.Provider) flamego.Handler {
 		perm, rawTTL, err := provider.Authorize(ctx, logger.Scoped("forge"), repo, username, token)
 		if err != nil {
 			if errors.Is(err, forge.ErrTokenInvalid) {
-				http.Error(c.ResponseWriter(), "token is invalid or lacks repository access", http.StatusForbidden)
+				writeLFSError(c.ResponseWriter(), http.StatusForbidden, "token is invalid or lacks repository access")
 			} else {
 				logger.ErrorContext(ctx, "Failed to verify repository permissions", "repo", repo, "error", err)
-				http.Error(c.ResponseWriter(), http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+				writeLFSError(c.ResponseWriter(), http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 			}
 			return
 		}

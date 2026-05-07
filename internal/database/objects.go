@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -115,7 +116,7 @@ WHERE id = @id`,
 		return nil
 	})
 	if err != nil {
-		return "", err
+		return "", errors.Wrap(err, "link object")
 	}
 	return storedURI, nil
 }
@@ -189,7 +190,7 @@ WHERE id = @id`,
 		return nil
 	})
 	if err != nil {
-		return "", err
+		return "", errors.Wrap(err, "verify object")
 	}
 	return storedURI, nil
 }
@@ -242,4 +243,114 @@ AND objects.verified_at IS NOT NULL`,
 		out[r.OID] = r
 	}
 	return out, nil
+}
+
+// SweepOrphanObjects deletes up to limit pending objects (verified_at IS NULL)
+// whose created_at is older than orphanAge. Selection uses FOR UPDATE SKIP
+// LOCKED so multiple lfsd instances running the janitor concurrently never
+// contend on the same rows.
+//
+// Returns the deleted rows so the caller can delete the corresponding storage
+// objects. The DB delete and the row lock are held in a single transaction.
+// The storage delete happens after commit, so callers must tolerate a row
+// whose stored object outlives the row by a few milliseconds.
+func (d *DB) SweepOrphanObjects(ctx context.Context, orphanAge time.Duration, limit int) ([]Object, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	var deleted []Object
+	err := d.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var rows []Object
+		if err := tx.Raw(`
+SELECT *
+FROM objects
+WHERE verified_at IS NULL
+  AND created_at < now() - CAST(@age AS interval)
+ORDER BY created_at
+LIMIT @limit
+FOR UPDATE SKIP LOCKED`,
+			map[string]any{
+				"age":   formatPGInterval(orphanAge),
+				"limit": limit,
+			},
+		).Scan(&rows).Error; err != nil {
+			return errors.Wrap(err, "select orphan objects")
+		}
+		if len(rows) == 0 {
+			return nil
+		}
+		ids := make([]int64, len(rows))
+		for i, r := range rows {
+			ids[i] = r.ID
+		}
+		if err := tx.Exec(
+			`DELETE FROM objects WHERE id = ANY(@ids)`,
+			map[string]any{"ids": pq.Array(ids)},
+		).Error; err != nil {
+			return errors.Wrap(err, "delete orphan objects")
+		}
+		deleted = rows
+		return nil
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "sweep orphan objects")
+	}
+	return deleted, nil
+}
+
+// SweepUnreferencedObjects deletes up to limit verified objects whose
+// repo_count has dropped to zero.
+//
+// Selection uses FOR UPDATE SKIP LOCKED. LinkObject's upsert takes the same
+// row lock before touching repo_objects, so a relink that started before our
+// lock will have committed (and bumped repo_count off zero) before we acquire,
+// and a relink that starts after will block on our lock until we commit.
+func (d *DB) SweepUnreferencedObjects(ctx context.Context, limit int) ([]Object, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	var deleted []Object
+	err := d.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var candidates []Object
+		if err := tx.Raw(`
+SELECT *
+FROM objects
+WHERE verified_at IS NOT NULL
+  AND repo_count = 0
+ORDER BY verified_at
+LIMIT @limit
+FOR UPDATE SKIP LOCKED`,
+			map[string]any{
+				"limit": limit,
+			},
+		).Scan(&candidates).Error; err != nil {
+			return errors.Wrap(err, "select unreferenced objects")
+		}
+		if len(candidates) == 0 {
+			return nil
+		}
+		ids := make([]int64, len(candidates))
+		for i, c := range candidates {
+			ids[i] = c.ID
+		}
+		if err := tx.Exec(
+			`DELETE FROM objects WHERE id = ANY(@ids)`,
+			map[string]any{"ids": pq.Array(ids)},
+		).Error; err != nil {
+			return errors.Wrap(err, "delete unreferenced objects")
+		}
+		deleted = candidates
+		return nil
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "sweep unreferenced objects")
+	}
+	return deleted, nil
+}
+
+// formatPGInterval renders a Go duration as a Postgres interval literal in
+// seconds. The numeric form sidesteps locale-sensitive parsing of strings
+// like "24 hours".
+func formatPGInterval(d time.Duration) string {
+	return strconv.FormatFloat(d.Seconds(), 'f', 3, 64) + " seconds"
 }

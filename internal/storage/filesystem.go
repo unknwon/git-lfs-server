@@ -42,6 +42,8 @@ func (b *FilesystemBackend) Name() string { return b.name }
 
 func (*FilesystemBackend) Type() Type { return TypeFilesystem }
 
+func (b *FilesystemBackend) Scheme() string { return b.scheme }
+
 func (b *FilesystemBackend) storagePath(oid string) string {
 	return filepath.Join(b.root, oid[0:2], oid[2:4], oid)
 }

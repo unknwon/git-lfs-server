@@ -38,6 +38,8 @@ func (b *S3PresignBackend) Name() string { return b.name }
 
 func (*S3PresignBackend) Type() Type { return TypeS3Presign }
 
+func (b *S3PresignBackend) Scheme() string { return b.scheme }
+
 // NewS3PresignBackend constructs a Presigner backed by an S3-compatible
 // service (e.g. Cloudflare R2, AWS S3). Credentials are supplied directly to
 // avoid implicit AWS_* env / ~/.aws/config lookups. The scheme is the URI
