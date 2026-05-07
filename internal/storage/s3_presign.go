@@ -62,7 +62,6 @@ func NewS3PresignBackend(name, scheme, bucket, accessKeyID, secretAccessKey, end
 	}
 
 	client := s3.NewFromConfig(aws.Config{
-		// R2 ignores region but the SDK requires one.
 		Region:      "auto",
 		Credentials: credentials.NewStaticCredentialsProvider(accessKeyID, secretAccessKey, ""),
 	}, func(o *s3.Options) {
@@ -111,12 +110,12 @@ func (b *S3PresignBackend) PresignPut(ctx context.Context, oid string, size int6
 		ChecksumSHA256: aws.String(checksumB64),
 	}, func(o *s3.PresignOptions) {
 		o.Expires = presignURLTTL
-		// DisableHeaderHoisting keeps x-amz-checksum-sha256 as a signed
-		// header instead of hoisting it to a query parameter, which is
-		// what makes S3/R2 enforce the checksum on PUT.
-		// https://github.com/aws/aws-sdk-go-v2/issues/2610
 		o.Presigner = v4.NewSigner(func(so *v4.SignerOptions) {
 			so.DisableURIPathEscaping = true
+			// DisableHeaderHoisting keeps x-amz-checksum-sha256 as a signed
+			// header instead of hoisting it to a query parameter, which is
+			// what makes S3/R2 enforce the checksum on PUT.
+			// https://github.com/aws/aws-sdk-go-v2/issues/2610
 			so.DisableHeaderHoisting = true
 		})
 	})

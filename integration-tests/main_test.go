@@ -1,6 +1,6 @@
 //go:build !windows
 
-package integration_test
+package integration_tests
 
 import (
 	"context"
@@ -29,7 +29,7 @@ var long = flag.Bool("long", false, "run long-running integration tests")
 func TestMain(m *testing.M) {
 	flag.Parse()
 	if !*long {
-		fmt.Println("integration: skipping (pass -long to run)")
+		fmt.Println("integration-tests: skipping (pass -long to run)")
 		os.Exit(0)
 	}
 	os.Exit(m.Run())
@@ -123,7 +123,7 @@ func setupLfsd(ctx context.Context, t *testing.T) func() {
 			Dir(root).Run().Wait(),
 		"go build lfsd")
 
-	confPath := filepath.Join(root, "integration", "testdata", "config.ini")
+	confPath := filepath.Join(root, "integration-tests", "testdata", "config.ini")
 	cmd := exec.CommandContext(ctx, binPath)
 	cmd.Env = append(os.Environ(), "LFSD_CONFIG_PATH="+confPath)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
