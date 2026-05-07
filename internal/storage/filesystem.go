@@ -67,24 +67,24 @@ func (b *FilesystemBackend) Put(ctx context.Context, oid string, r io.Reader) (s
 		return "", errors.Wrap(err, "create temp file")
 	}
 	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
+	defer func() { _ = os.Remove(tmpPath) }()
 
-	if _, err := io.Copy(tmp, r); err != nil {
+	if _, err = io.Copy(tmp, r); err != nil {
 		_ = tmp.Close()
 		return "", errors.Wrap(err, "copy to temp file")
 	}
-	if err := tmp.Sync(); err != nil {
+	if err = tmp.Sync(); err != nil {
 		_ = tmp.Close()
 		return "", errors.Wrap(err, "sync temp file")
 	}
-	if err := tmp.Close(); err != nil {
+	if err = tmp.Close(); err != nil {
 		return "", errors.Wrap(err, "close temp file")
 	}
 
-	if err := os.MkdirAll(filepath.Dir(final), 0o755); err != nil {
+	if err = os.MkdirAll(filepath.Dir(final), 0o755); err != nil {
 		return "", errors.Wrap(err, "create object dir")
 	}
-	if err := os.Rename(tmpPath, final); err != nil {
+	if err = os.Rename(tmpPath, final); err != nil {
 		return "", errors.Wrap(err, "rename to final path")
 	}
 	return uri, nil

@@ -41,8 +41,8 @@ type Proxier interface {
 	// Put stores the bytes from the reader under the given OID and returns a URI
 	// that uniquely identifies the stored object, including the backend scheme.
 	Put(ctx context.Context, oid string, r io.Reader) (uri string, err error)
-	// Open returns a reader for the object at URI. It returns ErrNotFound when the
-	// object does not exist. The caller MUST close the reader.
+	// Open returns a reader for the object at URI. It returns ErrNotFound when no
+	// matching object exists. The caller MUST close the reader.
 	Open(ctx context.Context, uri string) (io.ReadCloser, error)
 }
 
@@ -60,7 +60,7 @@ type Presigner interface {
 	PresignPut(ctx context.Context, oid string, size int64) (url string, headers map[string]string, err error)
 	// PresignGet returns a short-lived URL the client GETs from.
 	PresignGet(ctx context.Context, uri string) (url string, err error)
-	// Head returns the size of the object. It returns ErrNotFound when the object
-	// does not exist.
+	// Head returns the size of the object. It returns ErrNotFound when no matching
+	// object exists.
 	Head(ctx context.Context, uri string) (size int64, err error)
 }
