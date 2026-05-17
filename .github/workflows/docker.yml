@@ -17,7 +17,7 @@ concurrency:
 
 env:
   IMAGE: ghcr.io/unknwon/lfsd
-  IMAGE_DOCKERHUB: docker.io/unknwon/lfsd
+  IMAGE_DOCKERHUB: unknwon/lfsd
 
 jobs:
   buildx:
