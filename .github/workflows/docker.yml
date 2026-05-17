@@ -16,8 +16,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IMAGE: ghcr.io/unknwon/lfsd
-  IMAGE_DOCKERHUB: unknwon/lfsd
+  IMAGE: ghcr.io/unknwon/git-lfs-server
+  IMAGE_DOCKERHUB: unknwon/git-lfs-server
 
 jobs:
   buildx:
@@ -160,13 +160,13 @@ jobs:
             BUILD_DATE=${{ github.event.pull_request.updated_at }}
             BUILD_COMMIT=${{ github.event.pull_request.head.sha }}
           tags: |
-            ttl.sh/unknwon/lfsd-${{ steps.short-sha.outputs.sha }}:7d
+            ttl.sh/unknwon/git-lfs-server-${{ steps.short-sha.outputs.sha }}:7d
           cache-from: type=gha,scope=buildx-pull-request
           cache-to: type=gha,mode=max,scope=buildx-pull-request
       - name: Scan for container vulnerabilities
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
         with:
-          image-ref: ttl.sh/unknwon/lfsd-${{ steps.short-sha.outputs.sha }}:7d
+          image-ref: ttl.sh/unknwon/git-lfs-server-${{ steps.short-sha.outputs.sha }}:7d
           exit-code: '1'
 
   buildx-release:
