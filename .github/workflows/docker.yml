@@ -17,6 +17,7 @@ concurrency:
 
 env:
   IMAGE: ghcr.io/unknwon/lfsd
+  IMAGE_DOCKERHUB: docker.io/unknwon/lfsd
 
 jobs:
   buildx:
@@ -49,6 +50,11 @@ jobs:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login to Docker Hub
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
@@ -58,7 +64,7 @@ jobs:
           build-args: |
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
             BUILD_COMMIT=${{ github.sha }}
-          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,"name=${{ env.IMAGE }},${{ env.IMAGE_DOCKERHUB }}",push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=buildx-${{ steps.prep.outputs.pair }}
           cache-to: type=gha,mode=max,scope=buildx-${{ steps.prep.outputs.pair }}
       - name: Export digest
@@ -96,14 +102,24 @@ jobs:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login to Docker Hub
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Create manifest list and push
         working-directory: /tmp/digests
         run: |
           # shellcheck disable=SC2046  # word-splitting is intentional, one digest per arg
           docker buildx imagetools create -t ${{ env.IMAGE }}:edge \
             $(printf '${{ env.IMAGE }}@sha256:%s ' *)
+          # shellcheck disable=SC2046
+          docker buildx imagetools create -t ${{ env.IMAGE_DOCKERHUB }}:edge \
+            $(printf '${{ env.IMAGE_DOCKERHUB }}@sha256:%s ' *)
       - name: Inspect image
-        run: docker buildx imagetools inspect ${{ env.IMAGE }}:edge
+        run: |
+          docker buildx imagetools inspect ${{ env.IMAGE }}:edge
+          docker buildx imagetools inspect ${{ env.IMAGE_DOCKERHUB }}:edge
       - name: Scan for container vulnerabilities
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
         with:
@@ -183,6 +199,11 @@ jobs:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login to Docker Hub
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
@@ -192,7 +213,7 @@ jobs:
           build-args: |
             BUILD_DATE=${{ github.event.release.published_at }}
             BUILD_COMMIT=${{ github.sha }}
-          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,"name=${{ env.IMAGE }},${{ env.IMAGE_DOCKERHUB }}",push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=buildx-release-${{ steps.prep.outputs.pair }}
           cache-to: type=gha,mode=max,scope=buildx-release-${{ steps.prep.outputs.pair }}
       - name: Export digest
@@ -223,12 +244,16 @@ jobs:
 
           # Tag stable releases (no prerelease suffix per semver) as :latest.
           TAG_ARGS="-t ${IMAGE}:${IMAGE_TAG}"
+          TAG_ARGS_DOCKERHUB="-t ${IMAGE_DOCKERHUB}:${IMAGE_TAG}"
           if [[ ! "$IMAGE_TAG" =~ - ]]; then
             TAG_ARGS="$TAG_ARGS -t ${IMAGE}:latest"
+            TAG_ARGS_DOCKERHUB="$TAG_ARGS_DOCKERHUB -t ${IMAGE_DOCKERHUB}:latest"
           fi
           {
             echo "primary=${IMAGE}:${IMAGE_TAG}"
+            echo "primary_dockerhub=${IMAGE_DOCKERHUB}:${IMAGE_TAG}"
             echo "args=$TAG_ARGS"
+            echo "args_dockerhub=$TAG_ARGS_DOCKERHUB"
           } >> "$GITHUB_OUTPUT"
       - name: Download digests
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -244,14 +269,24 @@ jobs:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login to Docker Hub
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Create manifest list and push
         working-directory: /tmp/digests
         run: |
           # shellcheck disable=SC2046  # word-splitting is intentional, one digest per arg
           docker buildx imagetools create ${{ steps.tags.outputs.args }} \
             $(printf '${{ env.IMAGE }}@sha256:%s ' *)
+          # shellcheck disable=SC2046
+          docker buildx imagetools create ${{ steps.tags.outputs.args_dockerhub }} \
+            $(printf '${{ env.IMAGE_DOCKERHUB }}@sha256:%s ' *)
       - name: Inspect image
-        run: docker buildx imagetools inspect ${{ steps.tags.outputs.primary }}
+        run: |
+          docker buildx imagetools inspect ${{ steps.tags.outputs.primary }}
+          docker buildx imagetools inspect ${{ steps.tags.outputs.primary_dockerhub }}
       - name: Send email on failure
         uses: unknwon/send-email-on-failure@89339a1bc93f4ad1d30f3b7e4911fcba985c9adb # v1
         if: ${{ failure() }}
