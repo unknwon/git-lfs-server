@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM golang:1.26.3-alpine@sha256:91eda9776261207ea25fd06b5b7fed8d397dd2c0a283e77f2ab6e91bfa71079d AS builder
+FROM golang:1.26.10-alpine3.24@sha256:87c65a688975c0b1d4585d204874c45ca78354670e3a5f11368c5a492303d696 AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -11,8 +11,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-s -w -X 'main.buildDate=${BUILD_DATE}' -X 'main.buildCommit=${BUILD_COMMIT}'" \
     -o /out/lfsd ./cmd/lfsd
 
-FROM alpine:3.23@sha256:5b10f432ef3da1b8d4c7eb6c487f2f5a8f096bc91145e68878dd4a5019afde11
-RUN apk add --no-cache ca-certificates \
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
+RUN apk add --no-cache ca-certificates "zlib>=1.4-r0" \
     && addgroup -S -g 1000 lfsd \
     && adduser -S -D -H -u 1000 -G lfsd -s /sbin/nologin lfsd
 COPY --from=builder /out/lfsd /app/lfsd
