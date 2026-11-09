@@ -12,7 +12,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -o /out/lfsd ./cmd/lfsd
 
 FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
-RUN apk add --no-cache ca-certificates \
+RUN apk add --no-cache ca-certificates "zlib>=1.4-r0" \
     && addgroup -S -g 1000 lfsd \
     && adduser -S -D -H -u 1000 -G lfsd -s /sbin/nologin lfsd
 COPY --from=builder /out/lfsd /app/lfsd
