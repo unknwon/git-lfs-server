@@ -48,6 +48,11 @@ func (b *FilesystemBackend) storagePath(oid string) string {
 	return filepath.Join(b.root, oid[0:2], oid[2:4], oid)
 }
 
+// URI returns the file URI of the object under the storage root.
+func (b *FilesystemBackend) URI(oid string) string {
+	return b.uriFromPath(b.storagePath(oid))
+}
+
 func (b *FilesystemBackend) Put(ctx context.Context, oid string, r io.Reader) (string, error) {
 	if len(oid) < 4 {
 		return "", errors.Newf("invalid oid %q", oid)

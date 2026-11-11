@@ -10,7 +10,7 @@ import (
 	"unknwon.dev/git-lfs-server/internal/database"
 	"unknwon.dev/git-lfs-server/internal/embed"
 	"unknwon.dev/git-lfs-server/internal/forge"
-	"unknwon.dev/git-lfs-server/internal/storage"
+	"unknwon.dev/git-lfs-server/lfs/storage"
 )
 
 // Host is the host of a forge, e.g., "github.com".

@@ -94,6 +94,12 @@ REPO_ALLOWLIST = myorg/**, otherorg/specific-repo
 
 The allowlist is enforced before the forge token check, so a request for a disallowed repo is rejected without a round-trip to the forge.
 
+## Using as a library
+
+The `unknwon.dev/git-lfs-server/lfs` module implements the Batch API and the basic transfer adapter for other Git servers to embed. It is a separate Go module so that importers do not pull in the dependencies of lfsd (PostgreSQL, Flamego, forge clients).
+
+An `lfs.Service` combines an `lfs.Store`, which records objects and the repositories they are linked to, with a `storage.Backend`, which holds the content. The caller keeps its own routing, authentication, authorization, and response encoding, identifies repositories with any string it likes, and calls `Batch`, `Upload`, `Download`, and `Verify` from its handlers. A `storage.Proxier` backend (e.g., `storage.FilesystemBackend`) streams content through the caller, and a `storage.Presigner` backend (e.g., `storage.S3PresignBackend`) redirects clients to the storage. `PreviousStorages` keeps objects readable after the backend for new uploads changes.
+
 ## Local development
 
 This project uses [moon](https://moonrepo.dev/) as its task runner. Install it with Homebrew:
