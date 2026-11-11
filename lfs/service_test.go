@@ -180,8 +180,9 @@ func TestService_Proxy(t *testing.T) {
 
 		_, err = s.Upload(ctx, discardLogger, "repo2", oid, size, strings.NewReader(content))
 		require.NoError(t, err)
-		_, err = s.Download(ctx, "repo2", oid)
+		download, err := s.Download(ctx, "repo2", oid)
 		require.NoError(t, err)
+		require.NoError(t, download.Content.Close())
 	})
 
 	t.Run("upload rejects invalid input", func(t *testing.T) {
