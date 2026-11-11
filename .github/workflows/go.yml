@@ -33,7 +33,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
-          go-version: 1.26.x
+          go-version: 1.27.x
       - name: Check Go module tidiness
         shell: bash
         run: |
@@ -55,7 +55,7 @@ jobs:
     name: Test
     strategy:
       matrix:
-        go-version: [ 1.26.x ]
+        go-version: [ 1.27.x ]
         platform: [ ubuntu-latest, macos-latest ]
     runs-on: ${{ matrix.platform }}
     steps:
@@ -77,7 +77,7 @@ jobs:
     name: Test Windows
     strategy:
       matrix:
-        go-version: [ 1.26.x ]
+        go-version: [ 1.27.x ]
         platform: [ windows-latest ]
     runs-on: ${{ matrix.platform }}
     steps:
