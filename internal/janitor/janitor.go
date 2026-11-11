@@ -10,7 +10,7 @@ import (
 	"unknwon.dev/git-lfs-server/internal/database"
 	"unknwon.dev/git-lfs-server/internal/logx"
 	"unknwon.dev/git-lfs-server/internal/ptrx"
-	"unknwon.dev/git-lfs-server/internal/storage"
+	"unknwon.dev/git-lfs-server/lfs/storage"
 )
 
 const (
