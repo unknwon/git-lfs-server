@@ -1,6 +1,6 @@
 module unknwon.dev/git-lfs-server
 
-go 1.26
+go 1.27
 
 require (
 	charm.land/lipgloss/v2 v2.0.3
