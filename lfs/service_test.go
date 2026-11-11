@@ -290,6 +290,7 @@ func TestService_Batch(t *testing.T) {
 					Href: endpoint.Href + "/" + newOID,
 					Header: map[string]string{
 						"Authorization":         "Basic Zm9vOmJhcg==",
+						"Content-Type":          "application/octet-stream",
 						"x-amz-checksum-sha256": "/jJgjJ71ts9+P5RkgCU/928k9OwGePPQ8H+YRMv/lgE=",
 					},
 				},

@@ -15,6 +15,7 @@ import (
 
 	"unknwon.dev/git-lfs-server/internal/forge"
 	"unknwon.dev/git-lfs-server/internal/logx"
+	"unknwon.dev/git-lfs-server/lfs"
 )
 
 func authorize(forges map[string]forge.Provider) flamego.Handler {
@@ -25,26 +26,26 @@ func authorize(forges map[string]forge.Provider) flamego.Handler {
 		host := hostFromContext(c)
 		provider, ok := forges[host]
 		if !ok {
-			writeLFSError(c.ResponseWriter(), http.StatusBadRequest, "unsupported forge host")
+			lfs.WriteError(c.ResponseWriter(), http.StatusBadRequest, "unsupported forge host")
 			return
 		}
 
 		username, token, ok := c.Request().BasicAuth()
 		if !ok || token == "" {
 			c.ResponseWriter().Header().Set("WWW-Authenticate", `Basic realm="git-lfs"`)
-			writeLFSError(c.ResponseWriter(), http.StatusUnauthorized, "basic auth credentials are required")
+			lfs.WriteError(c.ResponseWriter(), http.StatusUnauthorized, "basic auth credentials are required")
 			return
 		}
 
 		repo := strings.ToLower(c.Param("**"))
 		if repo == "" {
-			writeLFSError(c.ResponseWriter(), http.StatusBadRequest, "repository path is missing")
+			lfs.WriteError(c.ResponseWriter(), http.StatusBadRequest, "repository path is missing")
 			return
 		}
 
 		if !provider.Allow(repo) {
 			logger.InfoContext(ctx, "Repository rejected by allowlist", "host", host, "repo", repo)
-			writeLFSError(c.ResponseWriter(), http.StatusForbidden, "repository is not in the allowlist")
+			lfs.WriteError(c.ResponseWriter(), http.StatusForbidden, "repository is not in the allowlist")
 			return
 		}
 
@@ -62,10 +63,10 @@ func authorize(forges map[string]forge.Provider) flamego.Handler {
 		perm, rawTTL, err := provider.Authorize(ctx, logger.Scoped("forge"), repo, username, token)
 		if err != nil {
 			if errors.Is(err, forge.ErrTokenInvalid) {
-				writeLFSError(c.ResponseWriter(), http.StatusForbidden, "token is invalid or lacks repository access")
+				lfs.WriteError(c.ResponseWriter(), http.StatusForbidden, "token is invalid or lacks repository access")
 			} else {
 				logger.ErrorContext(ctx, "Failed to verify repository permissions", "repo", repo, "error", err)
-				writeLFSError(c.ResponseWriter(), http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+				lfs.WriteError(c.ResponseWriter(), http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 			}
 			return
 		}

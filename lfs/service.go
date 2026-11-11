@@ -19,9 +19,9 @@ import (
 )
 
 // Service serves LFS operations for repositories. Callers authenticate and
-// authorize each request before calling a method, and respond with the Code
-// and Message of a returned *Error. Any other returned error is an internal
-// error.
+// authorize each request, then either hand it to Serve, or call the operation
+// methods and respond with the Code and Message of a returned *Error. Any other
+// error returned by an operation method is an internal error.
 type Service struct {
 	Store Store
 	// Storage receives uploads and decides the transfer mode: content is
@@ -138,8 +138,11 @@ func (s *Service) Batch(ctx context.Context, logger *slog.Logger, repo string, e
 				out.Error = &ObjectError{Code: http.StatusConflict, Message: "OID exists with different size"}
 			default:
 				rawOID, _ := hex.DecodeString(in.OID) // Validated above.
-				uploadHeader := make(map[string]string, len(endpoint.Header)+1)
+				uploadHeader := make(map[string]string, len(endpoint.Header)+2)
 				maps.Copy(uploadHeader, endpoint.Header)
+				// The Git LFS client otherwise sends a Content-Type detected from
+				// the file content.
+				uploadHeader["Content-Type"] = "application/octet-stream"
 				// Presigned uploads require the client to send the checksum that
 				// the storage verifies the content against.
 				uploadHeader["x-amz-checksum-sha256"] = base64.StdEncoding.EncodeToString(rawOID)
