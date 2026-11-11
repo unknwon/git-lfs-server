@@ -69,12 +69,13 @@ func main() {
 			CrossRepoDedup: true,
 		}
 	}
+	serve := serveLFS(logger.Scoped("lfs"), config.Server.ExternalURL, services)
 	f.Group("/{host}/{**}/info/lfs/objects", func() {
-		f.Post("/batch", serveBatch(logger.Scoped("batch"), config.Server.ExternalURL))
-		f.Get("/{oid}", serveDownload(logger.Scoped("download")))
-		f.Put("/{oid}", serveUpload(logger.Scoped("upload")))
-		f.Post("/verify", serveVerify(logger.Scoped("verify")))
-	}, authorize(logger.Scoped("authorize"), config.Forges), mapService(logger, services))
+		f.Post("/batch", serve)
+		f.Get("/{oid}", serve)
+		f.Put("/{oid}", serve)
+		f.Post("/verify", serve)
+	}, authorize(logger.Scoped("authorize"), config.Forges))
 
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
