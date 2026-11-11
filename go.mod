@@ -17,9 +17,9 @@ require (
 	github.com/sourcegraph/run v0.12.0
 	github.com/stretchr/testify v1.11.1
 	go.bobheadxi.dev/streamline v1.3.2
-	gopkg.in/ini.v1 v1.67.2
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.1
+	unknwon.dev/ini/v2 v2.0.0-beta.4
 )
 
 require (

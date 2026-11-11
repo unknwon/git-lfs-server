@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
-	"gopkg.in/ini.v1"
+	"unknwon.dev/ini/v2"
 
 	"unknwon.dev/git-lfs-server/internal/database"
 	"unknwon.dev/git-lfs-server/internal/embed"
@@ -40,7 +40,7 @@ const (
 )
 
 func loadConfig(customPath string) (*Config, error) {
-	f, err := ini.Load(embed.Config)
+	f, err := ini.Load(embed.Config, ini.ValueMapping(os.ExpandEnv))
 	if err != nil {
 		return nil, errors.Wrap(err, "load embedded config")
 	}
@@ -49,7 +49,6 @@ func loadConfig(customPath string) (*Config, error) {
 			return nil, errors.Wrapf(err, "load custom config %q", customPath)
 		}
 	}
-	f.ValueMapper = os.ExpandEnv
 
 	var c Config
 
