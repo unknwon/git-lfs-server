@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"unknwon.dev/git-lfs-server/lfs/internal/iox"
 	"unknwon.dev/git-lfs-server/lfs/storage"
@@ -41,6 +43,10 @@ type Service struct {
 	// its full content, so knowing an OID and its size is not enough to read the
 	// object through a repository the client has write access to.
 	CrossRepoDedup bool
+	// TracerProvider creates the spans of LFS operations and of the calls to
+	// storage backends. Nil uses the global provider of
+	// go.opentelemetry.io/otel.
+	TracerProvider trace.TracerProvider
 }
 
 // Endpoint describes how the client reaches the transfer endpoints of a
@@ -66,7 +72,14 @@ type Redirect struct {
 
 // Batch answers a batch request for repo. Callers must check that the actor is
 // allowed to perform req.Operation before calling it.
-func (s *Service) Batch(ctx context.Context, logger *slog.Logger, repo string, endpoint Endpoint, req BatchRequest) (*BatchResponse, error) {
+func (s *Service) Batch(ctx context.Context, logger *slog.Logger, repo string, endpoint Endpoint, req BatchRequest) (_ *BatchResponse, err error) {
+	ctx, span := s.startSpan(ctx, "lfs.Batch",
+		attribute.String("lfs.repo", repo),
+		attribute.String("lfs.operation", req.Operation),
+		attribute.Int("lfs.object_count", len(req.Objects)),
+	)
+	defer func() { endSpan(span, err) }()
+
 	if req.Operation != OperationUpload && req.Operation != OperationDownload {
 		return nil, &Error{Code: http.StatusBadRequest, Message: `operation must be "upload" or "download"`}
 	}
@@ -82,10 +95,7 @@ func (s *Service) Batch(ctx context.Context, logger *slog.Logger, repo string, e
 		oids[i] = o.OID
 	}
 
-	var (
-		existing map[string]Object
-		err      error
-	)
+	var existing map[string]Object
 	switch req.Operation {
 	case OperationDownload:
 		existing, err = s.Store.GetRepoObjects(ctx, repo, oids)
@@ -179,7 +189,14 @@ type UploadResult struct {
 // Upload handles an upload of size bytes for oid to repo. For a
 // storage.Proxier, it stores the content read from body after verifying its
 // size and hash. For a storage.Presigner, it does not read body.
-func (s *Service) Upload(ctx context.Context, logger *slog.Logger, repo, oid string, size int64, body io.Reader) (*UploadResult, error) {
+func (s *Service) Upload(ctx context.Context, logger *slog.Logger, repo, oid string, size int64, body io.Reader) (_ *UploadResult, err error) {
+	ctx, span := s.startSpan(ctx, "lfs.Upload",
+		attribute.String("lfs.repo", repo),
+		attribute.String("lfs.oid", oid),
+		attribute.Int64("lfs.size", size),
+	)
+	defer func() { endSpan(span, err) }()
+
 	if !ValidOID(oid) {
 		return nil, &Error{Code: http.StatusBadRequest, Message: "invalid oid"}
 	}
@@ -205,7 +222,9 @@ func (s *Service) Upload(ctx context.Context, logger *slog.Logger, repo, oid str
 
 func (s *Service) uploadProxy(ctx context.Context, logger *slog.Logger, backend storage.Proxier, repo, oid string, size int64, body io.Reader) (*UploadResult, error) {
 	reader := iox.NewSHA256Reader(iox.NewExactSizeReader(body, size), oid)
-	uri, err := backend.Put(ctx, oid, reader)
+	putCtx, span := s.startStorageSpan(ctx, "Put", backend)
+	uri, err := backend.Put(putCtx, oid, reader)
+	endSpan(span, err)
 	if err == nil {
 		// Put skips reading when the content is already stored, but the client
 		// must still prove it has the content before the object is linked to
@@ -230,9 +249,7 @@ func (s *Service) uploadProxy(ctx context.Context, logger *slog.Logger, backend 
 		return nil, errors.Wrap(err, "link object")
 	}
 	if storedURI != uri {
-		if err := backend.Delete(ctx, uri); err != nil {
-			logger.ErrorContext(ctx, "Failed to delete orphan object", "uri", uri, "error", err)
-		}
+		s.deleteOrphan(ctx, logger, backend, uri)
 	}
 	return &UploadResult{}, nil
 }
@@ -249,7 +266,9 @@ func (s *Service) uploadPresign(ctx context.Context, backend storage.Presigner, 
 	if err = s.Store.InsertPendingObject(ctx, oid); err != nil {
 		return nil, errors.Wrap(err, "insert pending object")
 	}
-	url, header, err := backend.PresignPut(ctx, oid, size)
+	presignCtx, span := s.startStorageSpan(ctx, "PresignPut", backend)
+	url, header, err := backend.PresignPut(presignCtx, oid, size)
+	endSpan(span, err)
 	if err != nil {
 		return nil, errors.Wrap(err, "presign upload")
 	}
@@ -269,7 +288,13 @@ type DownloadResult struct {
 }
 
 // Download handles a download of oid from repo.
-func (s *Service) Download(ctx context.Context, repo, oid string) (*DownloadResult, error) {
+func (s *Service) Download(ctx context.Context, repo, oid string) (_ *DownloadResult, err error) {
+	ctx, span := s.startSpan(ctx, "lfs.Download",
+		attribute.String("lfs.repo", repo),
+		attribute.String("lfs.oid", oid),
+	)
+	defer func() { endSpan(span, err) }()
+
 	if !ValidOID(oid) {
 		return nil, &Error{Code: http.StatusBadRequest, Message: "invalid oid"}
 	}
@@ -286,7 +311,9 @@ func (s *Service) Download(ctx context.Context, repo, oid string) (*DownloadResu
 	backend := s.backendFor(object.URI)
 	switch b := backend.(type) {
 	case storage.Proxier:
-		rc, err := b.Open(ctx, object.URI)
+		openCtx, span := s.startStorageSpan(ctx, "Open", b)
+		rc, err := b.Open(openCtx, object.URI)
+		endSpan(span, err)
 		if err != nil {
 			if errors.Is(err, storage.ErrNotFound) {
 				return nil, errors.Wrapf(err, "object %q is recorded but missing in storage", object.URI)
@@ -295,7 +322,9 @@ func (s *Service) Download(ctx context.Context, repo, oid string) (*DownloadResu
 		}
 		return &DownloadResult{Content: rc, Size: object.Size}, nil
 	case storage.Presigner:
-		url, err := b.PresignGet(ctx, object.URI)
+		presignCtx, span := s.startStorageSpan(ctx, "PresignGet", b)
+		url, err := b.PresignGet(presignCtx, object.URI)
+		endSpan(span, err)
 		if err != nil {
 			return nil, errors.Wrap(err, "presign download")
 		}
@@ -323,7 +352,14 @@ func (s *Service) backendFor(uri string) storage.Backend {
 
 // Verify handles the verification of an upload to repo. A presigned upload
 // becomes downloadable only after it is verified.
-func (s *Service) Verify(ctx context.Context, logger *slog.Logger, repo string, req VerifyRequest) error {
+func (s *Service) Verify(ctx context.Context, logger *slog.Logger, repo string, req VerifyRequest) (err error) {
+	ctx, span := s.startSpan(ctx, "lfs.Verify",
+		attribute.String("lfs.repo", repo),
+		attribute.String("lfs.oid", req.OID),
+		attribute.Int64("lfs.size", req.Size),
+	)
+	defer func() { endSpan(span, err) }()
+
 	if !ValidOID(req.OID) {
 		return &Error{Code: http.StatusBadRequest, Message: "invalid oid"}
 	}
@@ -355,7 +391,9 @@ func (s *Service) verifyProxy(ctx context.Context, repo string, req VerifyReques
 
 func (s *Service) verifyPresign(ctx context.Context, logger *slog.Logger, backend storage.Presigner, repo string, req VerifyRequest) error {
 	uri := backend.URI(req.OID)
-	headSize, err := backend.Head(ctx, uri)
+	headCtx, span := s.startStorageSpan(ctx, "Head", backend)
+	headSize, err := backend.Head(headCtx, uri)
+	endSpan(span, err)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			return &Error{Code: http.StatusUnprocessableEntity, Message: "object does not exist in storage"}
@@ -374,9 +412,18 @@ func (s *Service) verifyPresign(ctx context.Context, logger *slog.Logger, backen
 		return errors.Wrap(err, "mark object verified")
 	}
 	if storedURI != uri {
-		if err := backend.Delete(ctx, uri); err != nil {
-			logger.ErrorContext(ctx, "Failed to delete orphan object", "uri", uri, "error", err)
-		}
+		s.deleteOrphan(ctx, logger, backend, uri)
 	}
 	return nil
+}
+
+// deleteOrphan deletes the content at uri that was stored again while the
+// object was already recorded with another URI.
+func (s *Service) deleteOrphan(ctx context.Context, logger *slog.Logger, backend storage.Backend, uri string) {
+	ctx, span := s.startStorageSpan(ctx, "Delete", backend)
+	err := backend.Delete(ctx, uri)
+	endSpan(span, err)
+	if err != nil {
+		logger.ErrorContext(ctx, "Failed to delete orphan object", "uri", uri, "error", err)
+	}
 }

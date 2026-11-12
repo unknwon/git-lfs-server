@@ -18,6 +18,10 @@ import (
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"unknwon.dev/git-lfs-server/lfs/storage"
 )
@@ -372,4 +376,72 @@ func TestService_Presign(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, crossRepoDedup, result.Redirect == nil, "crossRepoDedup=%v", crossRepoDedup)
 	}
+}
+
+// failingStore fails every lookup.
+type failingStore struct{ *memStore }
+
+func (failingStore) GetRepoObjects(context.Context, string, []string) (map[string]Object, error) {
+	return nil, errors.New("store is down")
+}
+
+func TestService_Tracing(t *testing.T) {
+	ctx := t.Context()
+	content := "traced content"
+	oid := sha256Hex(content)
+	size := int64(len(content))
+
+	newService := func(store Store) (*Service, *tracetest.SpanRecorder) {
+		recorder := tracetest.NewSpanRecorder()
+		return &Service{
+			Store:          store,
+			Storage:        newFilesystemBackend(t, "fs", "file://"),
+			TracerProvider: sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder)),
+		}, recorder
+	}
+	spansByName := func(recorder *tracetest.SpanRecorder) map[string]sdktrace.ReadOnlySpan {
+		spans := map[string]sdktrace.ReadOnlySpan{}
+		for _, span := range recorder.Ended() {
+			spans[span.Name()] = span
+		}
+		return spans
+	}
+
+	t.Run("storage calls are children of the operation", func(t *testing.T) {
+		s, recorder := newService(newMemStore())
+		_, err := s.Upload(ctx, discardLogger, "repo1", oid, size, strings.NewReader(content))
+		require.NoError(t, err)
+
+		spans := spansByName(recorder)
+		require.Contains(t, spans, "lfs.Upload")
+		require.Contains(t, spans, "storage.Put")
+		upload, put := spans["lfs.Upload"], spans["storage.Put"]
+		assert.Equal(t, upload.SpanContext().SpanID(), put.Parent().SpanID())
+		assert.Contains(t, upload.Attributes(), attribute.String("lfs.repo", "repo1"))
+		assert.Contains(t, upload.Attributes(), attribute.String("lfs.oid", oid))
+		assert.Contains(t, put.Attributes(), attribute.String("lfs.storage.name", "fs"))
+		assert.Contains(t, put.Attributes(), attribute.String("lfs.storage.type", "filesystem"))
+	})
+
+	t.Run("client errors do not fail the span", func(t *testing.T) {
+		s, recorder := newService(newMemStore())
+		_, err := s.Download(ctx, "repo1", oid)
+		requireLFSError(t, err, http.StatusNotFound)
+
+		download := spansByName(recorder)["lfs.Download"]
+		require.NotNil(t, download)
+		assert.Equal(t, codes.Unset, download.Status().Code)
+		assert.Contains(t, download.Attributes(), attribute.Int("lfs.error.code", http.StatusNotFound))
+	})
+
+	t.Run("internal errors fail the span", func(t *testing.T) {
+		s, recorder := newService(failingStore{newMemStore()})
+		_, err := s.Download(ctx, "repo1", oid)
+		require.Error(t, err)
+
+		download := spansByName(recorder)["lfs.Download"]
+		require.NotNil(t, download)
+		assert.Equal(t, codes.Error, download.Status().Code)
+		assert.Contains(t, download.Status().Description, "store is down")
+	})
 }
