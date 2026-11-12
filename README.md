@@ -114,6 +114,28 @@ mux.HandleFunc("/{repo}/info/lfs/objects/", func(w http.ResponseWriter, r *http.
 
 The lower-level `Batch`, `Upload`, `Download`, and `Verify` methods are available for servers that need their own HTTP handling.
 
+The module depends only on the OpenTelemetry API. `Service.TracerProvider` receives the spans of LFS operations (`lfs.Batch`, `lfs.Upload`, `lfs.Download`, `lfs.Verify`) and of every call to the storage backend (`storage.Put`, `storage.Head`, etc.), so custom backends are traced without extra work. When it is nil, the global provider from `go.opentelemetry.io/otel` is used.
+
+## Tracing
+
+lfsd exports OpenTelemetry traces over OTLP/HTTP when tracing is enabled:
+
+```ini
+[tracing]
+ENABLED = true
+ENDPOINT = http://otel-collector:4318/v1/traces
+SAMPLE_RATIO = 0.1
+```
+
+Leave `ENDPOINT` empty to configure the exporter with the standard `OTEL_EXPORTER_OTLP_*` environment variables, e.g., `OTEL_EXPORTER_OTLP_HEADERS` for an API key. `OTEL_SERVICE_NAME` and `OTEL_RESOURCE_ATTRIBUTES` override the default `service.name=lfsd` and `service.version` (the build commit). Requests that carry a sampled W3C `traceparent` are always sampled, so lfsd joins the traces of a reverse proxy or a client that propagates context.
+
+Each LFS request produces a span named after its route, e.g., `POST /{host}/{**}/info/lfs/objects/batch`, with these children:
+
+- `authorize`: whether the permission came from the cache, with the forge API call as a child. Credentials are never recorded, and the trace context is not sent to the forge.
+- `lfs.Batch`, `lfs.Upload`, `lfs.Download`, or `lfs.Verify`, with the database queries and storage calls of the operation.
+
+The janitor records a `janitor.Sweep` trace per sweep. `/healthz` is not traced. Log records written during a traced request carry its `traceID` and `spanID`, and error logs are attached to the span as events.
+
 ## Local development
 
 This project uses [moon](https://moonrepo.dev/) as its task runner. Install it with Homebrew:

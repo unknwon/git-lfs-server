@@ -29,7 +29,7 @@ func NewGitHubProvider(host string, allowlist *RepoAllowlist) *GitHubProvider {
 	return &GitHubProvider{
 		host:      host,
 		apiBase:   githubAPIBase(host),
-		client:    &http.Client{Timeout: 30 * time.Second},
+		client:    newHTTPClient(),
 		allowlist: allowlist,
 	}
 }

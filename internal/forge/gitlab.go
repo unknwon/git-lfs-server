@@ -28,7 +28,7 @@ func (p *GitLabProvider) Allow(repo string) bool { return p.allowlist.Allow(repo
 func NewGitLabProvider(host string, allowlist *RepoAllowlist) *GitLabProvider {
 	return &GitLabProvider{
 		baseURL:   "https://" + host,
-		client:    &http.Client{Timeout: 30 * time.Second},
+		client:    newHTTPClient(),
 		allowlist: allowlist,
 	}
 }
