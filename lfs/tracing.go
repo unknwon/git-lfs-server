@@ -12,14 +12,14 @@ import (
 	"unknwon.dev/git-lfs-server/lfs/storage"
 )
 
-const tracerName = "unknwon.dev/git-lfs-server/lfs"
+const instrumentationName = "unknwon.dev/git-lfs-server/lfs"
 
 func (s *Service) startSpan(ctx context.Context, name string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
 	tp := s.TracerProvider
 	if tp == nil {
 		tp = otel.GetTracerProvider()
 	}
-	return tp.Tracer(tracerName).Start(ctx, name, trace.WithAttributes(attrs...))
+	return tp.Tracer(instrumentationName).Start(ctx, name, trace.WithAttributes(attrs...))
 }
 
 // startStorageSpan starts the span of a call to backend, so that every backend

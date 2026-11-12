@@ -126,6 +126,7 @@ func (s *Service) serveUpload(logger *slog.Logger, w http.ResponseWriter, r *htt
 	case result.Existed:
 		w.WriteHeader(http.StatusOK)
 	default:
+		s.addProxiedBytes(r.Context(), OperationUpload, r.ContentLength)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -150,7 +151,11 @@ func (s *Service) serveDownload(logger *slog.Logger, w http.ResponseWriter, r *h
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", strconv.FormatInt(result.Size, 10))
 	w.WriteHeader(http.StatusOK)
-	if _, err = io.Copy(w, result.Content); err != nil {
+	// Counted here rather than by wrapping Content, which would stop io.Copy
+	// from using sendfile for files.
+	n, err := io.Copy(w, result.Content)
+	s.addProxiedBytes(r.Context(), OperationDownload, n)
+	if err != nil {
 		logger.ErrorContext(r.Context(), "Failed to stream object", "oid", oid, "error", err)
 	}
 }
