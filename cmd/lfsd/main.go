@@ -51,6 +51,20 @@ func main() {
 	if config.Tracing.Enabled {
 		logger.InfoContext(ctx, "Tracing enabled", "sampleRatio", config.Tracing.SampleRatio)
 	}
+	// Metrics stay no-op without an address, like tracing when disabled.
+	var metricsSrv *http.Server
+	if config.Metrics.ListenAddress != "" {
+		metricsHandler, err := setupMetrics(buildCommit)
+		if err != nil {
+			logger.FatalContext(ctx, "Failed to set up metrics", "error", err)
+		}
+		mux := http.NewServeMux()
+		mux.Handle("GET /metrics", metricsHandler)
+		metricsSrv = &http.Server{
+			Addr:    config.Metrics.ListenAddress,
+			Handler: mux,
+		}
+	}
 
 	for host, provider := range config.Forges {
 		logger.InfoContext(ctx, "Forge initialized", "host", host, "type", provider.Type())
@@ -87,10 +101,10 @@ func main() {
 	auth := authorize(config.Forges)
 	const objectsRoute = "/{host}/{**}/info/lfs/objects"
 	f.Group(objectsRoute, func() {
-		f.Post("/batch", traceRoute(objectsRoute+"/batch"), auth, serve)
-		f.Get("/{oid}", traceRoute(objectsRoute+"/{oid}"), auth, serve)
-		f.Put("/{oid}", traceRoute(objectsRoute+"/{oid}"), auth, serve)
-		f.Post("/verify", traceRoute(objectsRoute+"/verify"), auth, serve)
+		f.Post("/batch", instrumentRoute(objectsRoute+"/batch"), auth, serve)
+		f.Get("/{oid}", instrumentRoute(objectsRoute+"/{oid}"), auth, serve)
+		f.Put("/{oid}", instrumentRoute(objectsRoute+"/{oid}"), auth, serve)
+		f.Post("/verify", instrumentRoute(objectsRoute+"/verify"), auth, serve)
 	})
 
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
@@ -110,11 +124,25 @@ func main() {
 		}
 		stop()
 	})
+	if metricsSrv != nil {
+		routines.Go(func() {
+			// Metrics are not worth taking the LFS endpoints down for, so a
+			// failure here does not stop the server.
+			if err := metricsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.ErrorContext(ctx, "Metrics server exited unexpectedly", "error", err)
+			}
+		})
+	}
 	routines.Go(func() {
 		<-ctx.Done()
 		logger.WarnContext(ctx, "Server shutdown requested")
 		if err := srv.Shutdown(context.Background()); err != nil {
 			logger.ErrorContext(ctx, "Failed to shut down HTTP server gracefully", "error", err)
+		}
+		if metricsSrv != nil {
+			if err := metricsSrv.Shutdown(context.Background()); err != nil {
+				logger.ErrorContext(ctx, "Failed to shut down metrics server gracefully", "error", err)
+			}
 		}
 	})
 	routines.Go(func() {
@@ -124,6 +152,7 @@ func main() {
 	logger.InfoContext(ctx, "Server ready",
 		"buildDate", buildDate, "buildCommit", buildCommit,
 		"listenAddr", config.Server.ListenAddress,
+		"metricsAddr", config.Metrics.ListenAddress,
 	)
 	r := routines.WaitAndRecover()
 	// Flush the spans of the requests that finished during shutdown. The
@@ -136,13 +165,15 @@ func main() {
 	}
 }
 
-// traceRoute names the server span of the request after route, because the
-// otelhttp handler wraps the router and does not know which route matched.
-func traceRoute(route string) flamego.Handler {
+// instrumentRoute records route as the pattern that matched the request, like
+// http.ServeMux does. The otelhttp handler wraps the router and reads the
+// pattern after the request to name the server span and to label the HTTP
+// metrics with the route. It only sets the http.route span attribute when the
+// span starts, before routing, so that is set here.
+func instrumentRoute(route string) flamego.Handler {
 	return func(c flamego.Context) {
-		span := trace.SpanFromContext(c.Request().Context())
-		span.SetName(c.Request().Method + " " + route)
-		span.SetAttributes(
+		c.Request().Pattern = route
+		trace.SpanFromContext(c.Request().Context()).SetAttributes(
 			attribute.String("http.route", route),
 			attribute.String("lfs.forge.host", hostFromContext(c)),
 			attribute.String("lfs.repo", repoNameFromContext(c)),

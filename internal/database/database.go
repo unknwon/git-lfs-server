@@ -91,9 +91,9 @@ func New(ctx context.Context, logger *logx.Logger, cfg Config) (*DB, error) {
 	}
 
 	// Leave bound values out of spans so that they never record request data,
-	// e.g., object URIs.
-	if err = gormDB.Use(gormtracing.NewPlugin(gormtracing.WithoutQueryVariables(), gormtracing.WithoutMetrics())); err != nil {
-		return nil, errors.Wrap(err, "register tracing plugin")
+	// e.g., object URIs. The plugin also reports the connection pool stats.
+	if err = gormDB.Use(gormtracing.NewPlugin(gormtracing.WithoutQueryVariables())); err != nil {
+		return nil, errors.Wrap(err, "register OpenTelemetry plugin")
 	}
 
 	sqlDB, err := gormDB.DB()

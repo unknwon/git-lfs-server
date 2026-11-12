@@ -114,7 +114,7 @@ mux.HandleFunc("/{repo}/info/lfs/objects/", func(w http.ResponseWriter, r *http.
 
 The lower-level `Batch`, `Upload`, `Download`, and `Verify` methods are available for servers that need their own HTTP handling.
 
-The module depends only on the OpenTelemetry API. `Service.TracerProvider` receives the spans of LFS operations (`lfs.Batch`, `lfs.Upload`, `lfs.Download`, `lfs.Verify`) and of every call to the storage backend (`storage.Put`, `storage.Head`, etc.), so custom backends are traced without extra work. When it is nil, the global provider from `go.opentelemetry.io/otel` is used.
+The module depends only on the OpenTelemetry API. `Service.TracerProvider` receives the spans of LFS operations (`lfs.Batch`, `lfs.Upload`, `lfs.Download`, `lfs.Verify`) and of every call to the storage backend (`storage.Put`, `storage.Head`, etc.), so custom backends are traced without extra work. `Service.MeterProvider` receives the `lfs.batch.objects` and `lfs.proxied` metrics. Either provider falls back to the global one from `go.opentelemetry.io/otel` when it is nil.
 
 ## Tracing
 
@@ -135,6 +135,28 @@ Each LFS request produces a span named after its route, e.g., `POST /{host}/{**}
 - `lfs.Batch`, `lfs.Upload`, `lfs.Download`, or `lfs.Verify`, with the database queries and storage calls of the operation.
 
 The janitor records a `janitor.Sweep` trace per sweep. `/healthz` is not traced. Log records written during a traced request carry its `traceID` and `spanID`, and error logs are attached to the span as events.
+
+## Metrics
+
+lfsd serves Prometheus metrics at `/metrics` on a separate listener, so that they are not public along with the LFS endpoints:
+
+```ini
+[metrics]
+; Defaults to 127.0.0.1:3357. Use 0.0.0.0:3357 to scrape from another host or
+; container, or leave empty to disable metrics.
+LISTEN_ADDRESS = 0.0.0.0:3357
+```
+
+| Metric | Labels | Description |
+|--------|--------|-------------|
+| `http_server_request_duration_seconds`, `http_server_request_body_size_bytes`, `http_server_response_body_size_bytes` | `http_route`, `http_request_method`, `http_response_status_code` | LFS requests. `/healthz` is excluded. |
+| `http_client_request_duration_seconds` | `server_address`, `http_response_status_code` | Forge API calls. |
+| `lfs_batch_objects_total` | `lfs_operation` | Objects requested in batch requests. |
+| `lfs_proxied_bytes_total` | `lfs_operation` | Object content transferred through the server, i.e., with `filesystem` storage. Presigned transfers go directly between the client and the storage. |
+| `lfsd_auth_cache_lookups_total` | `lfs_auth_cache_hit` | Lookups of cached authorization results. |
+| `lfsd_janitor_objects_total` | `janitor_pass`, `janitor_result` | Objects swept by the janitor, by whether their content was deleted. |
+| `go_sql_connections_*` | | Database connection pool. |
+| `go_*`, `process_*` | | Go runtime and process. |
 
 ## Local development
 

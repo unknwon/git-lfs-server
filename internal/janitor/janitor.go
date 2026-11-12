@@ -8,6 +8,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
 	"unknwon.dev/git-lfs-server/internal/database"
@@ -15,6 +16,8 @@ import (
 	"unknwon.dev/git-lfs-server/internal/ptrx"
 	"unknwon.dev/git-lfs-server/lfs/storage"
 )
+
+const instrumentationName = "unknwon.dev/git-lfs-server/internal/janitor"
 
 const (
 	sweepInterval  = 30 * time.Minute
@@ -25,8 +28,9 @@ const (
 // Janitor sweeps orphan (never verified) and unreferenced (repo_count = 0)
 // objects.
 type Janitor struct {
-	db       *database.DB
-	storages []storage.Backend
+	db           *database.DB
+	storages     []storage.Backend
+	sweptObjects metric.Int64Counter
 }
 
 // New constructs a Janitor using the given list of storage backends.
@@ -40,7 +44,11 @@ func New(db *database.DB, storages map[string]storage.Backend) *Janitor {
 		seen[b.Scheme()] = struct{}{}
 		uniq = append(uniq, b)
 	}
-	return &Janitor{db: db, storages: uniq}
+	sweptObjects, _ := otel.Meter(instrumentationName).Int64Counter("lfsd.janitor.objects",
+		metric.WithUnit("{object}"),
+		metric.WithDescription("Objects the janitor swept, by pass and whether their content was deleted."),
+	)
+	return &Janitor{db: db, storages: uniq, sweptObjects: sweptObjects}
 }
 
 // Run blocks until ctx is canceled, sweeping on the configured interval. The
@@ -64,7 +72,7 @@ func (j *Janitor) Run(ctx context.Context, logger *logx.Logger) {
 // Sweep runs both cleanup passes once. Errors are logged but not returned.
 // The next tick will retry.
 func (j *Janitor) Sweep(ctx context.Context, logger *logx.Logger) {
-	tracer := otel.Tracer("unknwon.dev/git-lfs-server/internal/janitor")
+	tracer := otel.Tracer(instrumentationName)
 	ctx, span := tracer.Start(ctx, "janitor.Sweep")
 	defer span.End()
 
@@ -72,7 +80,7 @@ func (j *Janitor) Sweep(ctx context.Context, logger *logx.Logger) {
 	if objects, err := j.db.SweepOrphanObjects(orphanCtx, orphanAge, sweepBatchSize); err != nil {
 		logger.ErrorContext(orphanCtx, "Failed to sweep orphan objects", "error", err)
 	} else if len(objects) > 0 {
-		j.deleteObjects(orphanCtx, logger.Scoped("orphan"), objects)
+		j.deleteObjects(orphanCtx, logger.Scoped("orphan"), "orphan", objects)
 	}
 	orphanSpan.End()
 
@@ -80,13 +88,14 @@ func (j *Janitor) Sweep(ctx context.Context, logger *logx.Logger) {
 	if objects, err := j.db.SweepUnreferencedObjects(unreferencedCtx, sweepBatchSize); err != nil {
 		logger.ErrorContext(unreferencedCtx, "Failed to sweep unreferenced objects", "error", err)
 	} else if len(objects) > 0 {
-		j.deleteObjects(unreferencedCtx, logger.Scoped("unreferenced"), objects)
+		j.deleteObjects(unreferencedCtx, logger.Scoped("unreferenced"), "unreferenced", objects)
 	}
 	unreferencedSpan.End()
 }
 
 // deleteObjects deletes the given list of objects from the storage backends.
-func (j *Janitor) deleteObjects(ctx context.Context, logger *logx.Logger, objects []database.Object) {
+// The pass names the sweep that found them in metrics.
+func (j *Janitor) deleteObjects(ctx context.Context, logger *logx.Logger, pass string, objects []database.Object) {
 	var deletedCount, failedCount int
 	for _, o := range objects {
 		uri := ptrx.Deref(o.ObjectURI, "")
@@ -121,6 +130,9 @@ func (j *Janitor) deleteObjects(ctx context.Context, logger *logx.Logger, object
 		attribute.Int("janitor.deleted_count", deletedCount),
 		attribute.Int("janitor.failed_count", failedCount),
 	)
+	passAttr := attribute.String("janitor.pass", pass)
+	j.sweptObjects.Add(ctx, int64(deletedCount), metric.WithAttributes(passAttr, attribute.String("janitor.result", "deleted")))
+	j.sweptObjects.Add(ctx, int64(failedCount), metric.WithAttributes(passAttr, attribute.String("janitor.result", "failed")))
 	logFn := logger.InfoContext
 	if failedCount > 0 {
 		logFn = logger.ErrorContext

@@ -14,19 +14,26 @@ import (
 	"github.com/flamego/flamego"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 
 	"unknwon.dev/git-lfs-server/internal/forge"
 	"unknwon.dev/git-lfs-server/internal/logx"
 	"unknwon.dev/git-lfs-server/lfs"
 )
 
+const instrumentationName = "unknwon.dev/git-lfs-server/cmd/lfsd"
+
 func authorize(forges map[string]forge.Provider) flamego.Handler {
+	cacheLookups, _ := otel.Meter(instrumentationName).Int64Counter("lfsd.auth.cache.lookups",
+		metric.WithUnit("{lookup}"),
+		metric.WithDescription("Lookups of cached authorization results, by whether they hit."),
+	)
 	return func(c flamego.Context, logger *logx.Logger, cache cache.Cache) {
 		logger = logger.Scoped("authorize")
 		host := hostFromContext(c)
 		// The span never carries credentials: the forge decides access, and only
 		// its outcome is recorded.
-		ctx, span := otel.Tracer("unknwon.dev/git-lfs-server/cmd/lfsd").Start(c.Request().Context(), "authorize")
+		ctx, span := otel.Tracer(instrumentationName).Start(c.Request().Context(), "authorize")
 		defer span.End()
 
 		provider, ok := forges[host]
@@ -58,6 +65,7 @@ func authorize(forges map[string]forge.Provider) flamego.Handler {
 		if v, err := cache.Get(ctx, key); err == nil {
 			if perm, ok := v.(forge.Permission); ok {
 				span.SetAttributes(attribute.Bool("lfs.auth.cache_hit", true), attribute.String("lfs.permission", string(perm)))
+				cacheLookups.Add(ctx, 1, metric.WithAttributes(attribute.Bool("lfs.auth.cache_hit", true)))
 				c.Map(perm)
 				return
 			}
@@ -67,6 +75,7 @@ func authorize(forges map[string]forge.Provider) flamego.Handler {
 		}
 
 		span.SetAttributes(attribute.Bool("lfs.auth.cache_hit", false))
+		cacheLookups.Add(ctx, 1, metric.WithAttributes(attribute.Bool("lfs.auth.cache_hit", false)))
 		perm, rawTTL, err := provider.Authorize(ctx, logger.Scoped("forge"), repo, username, token)
 		if err != nil {
 			if errors.Is(err, forge.ErrTokenInvalid) {
