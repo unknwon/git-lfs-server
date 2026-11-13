@@ -11,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
 func TestService_Serve(t *testing.T) {
@@ -39,9 +41,33 @@ func TestService_Serve(t *testing.T) {
 		return `{"operation":"` + operation + `","objects":[{"oid":"` + oid + `","size":` + strconv.Itoa(size) + `}]}`
 	}
 	verify := `{"oid":"` + oid + `","size":` + strconv.Itoa(size) + `}`
+	// sums returns the values of the counter, keyed by its lfs.operation.
+	sums := func(t *testing.T, reader *sdkmetric.ManualReader, name string) map[string]int64 {
+		t.Helper()
+		var rm metricdata.ResourceMetrics
+		require.NoError(t, reader.Collect(t.Context(), &rm))
+		out := map[string]int64{}
+		for _, sm := range rm.ScopeMetrics {
+			for _, m := range sm.Metrics {
+				if m.Name != name {
+					continue
+				}
+				for _, dp := range m.Data.(metricdata.Sum[int64]).DataPoints {
+					operation, _ := dp.Attributes.Value("lfs.operation")
+					out[operation.AsString()] = dp.Value
+				}
+			}
+		}
+		return out
+	}
 
 	t.Run("proxied transfer", func(t *testing.T) {
-		s := &Service{Store: newMemStore(), Storage: newFilesystemBackend(t, "fs", "file://")}
+		reader := sdkmetric.NewManualReader()
+		s := &Service{
+			Store:         newMemStore(),
+			Storage:       newFilesystemBackend(t, "fs", "file://"),
+			MeterProvider: sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)),
+		}
 
 		w := serve(s, readWrite, http.MethodPost, "/batch", batch(OperationUpload))
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -74,10 +100,20 @@ func TestService_Serve(t *testing.T) {
 		assert.Equal(t, "application/octet-stream", w.Header().Get("Content-Type"))
 		assert.Equal(t, strconv.Itoa(size), w.Header().Get("Content-Length"))
 		assert.Equal(t, content, w.Body.String())
+
+		assert.Equal(t, map[string]int64{OperationUpload: 1}, sums(t, reader, "lfs.batch.objects"))
+		// The rejected upload of forged content is not counted.
+		wantProxied := map[string]int64{OperationUpload: int64(size), OperationDownload: int64(size)}
+		assert.Equal(t, wantProxied, sums(t, reader, "lfs.proxied"))
 	})
 
 	t.Run("presigned transfer redirects", func(t *testing.T) {
-		s := &Service{Store: newMemStore(), Storage: newS3PresignBackend(t)}
+		reader := sdkmetric.NewManualReader()
+		s := &Service{
+			Store:         newMemStore(),
+			Storage:       newS3PresignBackend(t),
+			MeterProvider: sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)),
+		}
 
 		w := serve(s, readWrite, http.MethodPut, "/"+oid, "")
 		require.Equal(t, http.StatusTemporaryRedirect, w.Code, w.Body.String())
@@ -102,6 +138,8 @@ func TestService_Serve(t *testing.T) {
 		require.NoError(t, resp.Body.Close())
 		require.NoError(t, err)
 		assert.Equal(t, content, string(got))
+
+		assert.Empty(t, sums(t, reader, "lfs.proxied"), "content never went through the server")
 	})
 
 	t.Run("checks permissions", func(t *testing.T) {

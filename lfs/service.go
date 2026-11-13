@@ -14,6 +14,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
 	"unknwon.dev/git-lfs-server/lfs/internal/iox"
@@ -47,6 +48,9 @@ type Service struct {
 	// storage backends. Nil uses the global provider of
 	// go.opentelemetry.io/otel.
 	TracerProvider trace.TracerProvider
+	// MeterProvider records the metrics of LFS operations. Nil uses the global
+	// provider of go.opentelemetry.io/otel.
+	MeterProvider metric.MeterProvider
 }
 
 // Endpoint describes how the client reaches the transfer endpoints of a
@@ -94,6 +98,7 @@ func (s *Service) Batch(ctx context.Context, logger *slog.Logger, repo string, e
 		}
 		oids[i] = o.OID
 	}
+	s.addBatchObjects(ctx, req.Operation, len(req.Objects))
 
 	var existing map[string]Object
 	switch req.Operation {

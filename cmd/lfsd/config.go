@@ -24,6 +24,7 @@ type Config struct {
 	Storages map[Host]storage.Backend
 	Log      LogConfig
 	Tracing  tracing.Config
+	Metrics  MetricsConfig
 }
 
 type ServerConfig struct {
@@ -34,6 +35,10 @@ type ServerConfig struct {
 
 type LogConfig struct {
 	Level string `ini:"LEVEL"`
+}
+
+type MetricsConfig struct {
+	ListenAddress string `ini:"LISTEN_ADDRESS"`
 }
 
 const (
@@ -66,6 +71,9 @@ func loadConfig(customPath string) (*Config, error) {
 	}
 	if err := f.Section("tracing").MapTo(&c.Tracing); err != nil {
 		return nil, errors.Wrap(err, `map [tracing] config`)
+	}
+	if err := f.Section("metrics").MapTo(&c.Metrics); err != nil {
+		return nil, errors.Wrap(err, `map [metrics] config`)
 	}
 
 	backendsByName := make(map[string]storage.Backend)
