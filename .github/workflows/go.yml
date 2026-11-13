@@ -7,6 +7,8 @@ on:
       - '**.go'
       - 'go.mod'
       - 'go.sum'
+      - 'lfs/go.mod'
+      - 'lfs/go.sum'
       - '.golangci.yml'
       - '.github/workflows/go.yml'
   pull_request:
@@ -14,6 +16,8 @@ on:
       - '**.go'
       - 'go.mod'
       - 'go.sum'
+      - 'lfs/go.mod'
+      - 'lfs/go.sum'
       - '.golangci.yml'
       - '.github/workflows/go.yml'
 env:
@@ -38,6 +42,7 @@ jobs:
         shell: bash
         run: |
           go mod tidy
+          (cd lfs && go mod tidy)
           STATUS=$(git status --porcelain)
           if [ ! -z "$STATUS" ]; then
             echo "Unstaged files:"
@@ -49,6 +54,12 @@ jobs:
         uses: golangci/golangci-lint-action@9fae48acfc02a90574d7c304a1758ef9895495fa # v7.0.1
         with:
           version: latest
+          args: --timeout=30m
+      - name: Run golangci-lint (lfs module)
+        uses: golangci/golangci-lint-action@9fae48acfc02a90574d7c304a1758ef9895495fa # v7.0.1
+        with:
+          version: latest
+          working-directory: lfs
           args: --timeout=30m
 
   test:
@@ -68,6 +79,7 @@ jobs:
       - name: Run tests with coverage
         run: |
           go test -shuffle=on -v -race -coverprofile=coverage -covermode=atomic -json ./... > test-report.json
+          (cd lfs && go test -shuffle=on -v -race -coverprofile=coverage -covermode=atomic -json ./...) >> test-report.json
           go install github.com/mfridman/tparse@latest
           tparse -all -file=test-report.json
 
@@ -88,4 +100,7 @@ jobs:
         with:
           go-version: ${{ matrix.go-version }}
       - name: Run tests with coverage
-        run: go test -shuffle=on -v -coverprofile=coverage -covermode=atomic ./...
+        shell: bash
+        run: |
+          go test -shuffle=on -v -coverprofile=coverage -covermode=atomic ./...
+          cd lfs && go test -shuffle=on -v -coverprofile=coverage -covermode=atomic ./...

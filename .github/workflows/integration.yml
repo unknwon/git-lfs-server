@@ -9,6 +9,7 @@ on:
       - 'integration-tests/**'
       - 'go.mod'
       - 'go.sum'
+      - 'lfs/**'
       - '.github/workflows/integration.yml'
   pull_request:
     paths:
@@ -17,6 +18,7 @@ on:
       - 'integration-tests/**'
       - 'go.mod'
       - 'go.sum'
+      - 'lfs/**'
       - '.github/workflows/integration.yml'
 
 permissions:

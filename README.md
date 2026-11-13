@@ -94,6 +94,10 @@ REPO_ALLOWLIST = myorg/**, otherorg/specific-repo
 
 The allowlist is enforced before the forge token check, so a request for a disallowed repo is rejected without a round-trip to the forge.
 
+## Using as a library
+
+The Git LFS logic of lfsd is available as the Go module `unknwon.dev/git-lfs-server/lfs`, with the same storage backends. See its [package documentation](https://pkg.go.dev/unknwon.dev/git-lfs-server/lfs) for usage.
+
 ## Local development
 
 This project uses [moon](https://moonrepo.dev/) as its task runner. Install it with Homebrew:

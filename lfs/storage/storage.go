@@ -20,6 +20,10 @@ type Backend interface {
 	Type() Type
 	// Scheme returns the URI scheme prefix (including "://") that this backend owns.
 	Scheme() string
+	// URI returns the canonical, non-expiring location of the object. Pure
+	// function of the OID and the backend's static config (e.g. bucket name),
+	// safe to compute without I/O.
+	URI(oid string) string
 	// Delete removes the object at uri. Returns nil if already absent.
 	Delete(ctx context.Context, uri string) error
 }
@@ -40,6 +44,7 @@ type Proxier interface {
 
 	// Put stores the bytes from the reader under the given OID and returns a URI
 	// that uniquely identifies the stored object, including the backend scheme.
+	// It may return without reading r when the object is already stored.
 	Put(ctx context.Context, oid string, r io.Reader) (uri string, err error)
 	// Open returns a reader for the object at URI. It returns ErrNotFound when no
 	// matching object exists. The caller MUST close the reader.
@@ -51,10 +56,6 @@ type Proxier interface {
 type Presigner interface {
 	Backend
 
-	// URI returns the canonical, non-expiring location of the object. Pure
-	// function of the OID and the backend's static config (e.g. bucket name),
-	// safe to compute without I/O.
-	URI(oid string) string
 	// PresignPut returns a short-lived URL the client PUTs to, along with the
 	// headers the client MUST send verbatim.
 	PresignPut(ctx context.Context, oid string, size int64) (url string, headers map[string]string, err error)

@@ -1,6 +1,7 @@
 package database
 
 import (
+	"cmp"
 	"context"
 	"strconv"
 	"time"
@@ -9,8 +10,10 @@ import (
 	"github.com/lib/pq"
 	"gorm.io/gorm"
 
-	"unknwon.dev/git-lfs-server/internal/ptrx"
+	"unknwon.dev/git-lfs-server/lfs"
 )
+
+var _ lfs.Store = (*DB)(nil)
 
 type Object struct {
 	ID         int64      `gorm:"column:id;primaryKey"`
@@ -23,48 +26,6 @@ type Object struct {
 }
 
 var ErrObjectNotFound = errors.New("database: object not found")
-
-// GetRepoObjectByOID fetches the verified Object linked to repoName by oid.
-// Pending (unverified) rows are excluded so unverified objects can never serve
-// as download sources. Returns ErrObjectNotFound when no row matches.
-func (d *DB) GetRepoObjectByOID(ctx context.Context, repoName, oid string) (*Object, error) {
-	var object Object
-	err := d.db.WithContext(ctx).Raw(`
-SELECT objects.*
-FROM objects
-JOIN repo_objects ON repo_objects.object_id = objects.id
-WHERE
-	repo_objects.repo_name = @repoName
-AND objects.oid = @oid
-AND objects.verified_at IS NOT NULL`,
-		map[string]any{"repoName": repoName, "oid": oid},
-	).Scan(&object).Error
-	if err != nil {
-		return nil, errors.Wrap(err, "select repo object by oid")
-	}
-	if object.ID == 0 {
-		return nil, errors.WithStack(ErrObjectNotFound)
-	}
-	return &object, nil
-}
-
-// GetObjectByOID fetches an Object by oid (verified or pending) without any
-// repo filtering. Used by the upload handler for the dedup short-circuit and
-// to detect pending rows. Returns ErrObjectNotFound when no row matches.
-func (d *DB) GetObjectByOID(ctx context.Context, oid string) (*Object, error) {
-	var object Object
-	err := d.db.WithContext(ctx).Raw(
-		`SELECT * FROM objects WHERE oid = @oid LIMIT 1`,
-		map[string]any{"oid": oid},
-	).Scan(&object).Error
-	if err != nil {
-		return nil, errors.Wrap(err, "select object by oid")
-	}
-	if object.ID == 0 {
-		return nil, errors.WithStack(ErrObjectNotFound)
-	}
-	return &object, nil
-}
 
 // LinkObject is the storage.Proxier verify-equivalent path: bytes are already
 // stored, write a fully-populated (verified) objects row and link it to
@@ -86,10 +47,10 @@ RETURNING *`,
 		).Scan(&object).Error; err != nil {
 			return errors.Wrap(err, "upsert object")
 		}
-		if storedSize := ptrx.Deref(object.Size, -1); storedSize != size {
+		if storedSize := *cmp.Or(object.Size, new(int64(-1))); storedSize != size {
 			return errors.Newf("oid %q already stored with size %d (request claimed %d)", oid, storedSize, size)
 		}
-		storedURI = ptrx.Deref(object.ObjectURI, "")
+		storedURI = *cmp.Or(object.ObjectURI, new(""))
 		if storedURI == "" {
 			return errors.Newf("oid %q upserted without object_uri", oid)
 		}
@@ -160,10 +121,10 @@ WHERE oid = @oid AND verified_at IS NULL`,
 		if object.ID == 0 {
 			return errors.WithStack(ErrObjectNotFound)
 		}
-		if storedSize := ptrx.Deref(object.Size, -1); storedSize != size {
+		if storedSize := *cmp.Or(object.Size, new(int64(-1))); storedSize != size {
 			return errors.Newf("oid %q stored with size %d (verify claimed %d)", oid, storedSize, size)
 		}
-		storedURI = ptrx.Deref(object.ObjectURI, "")
+		storedURI = *cmp.Or(object.ObjectURI, new(""))
 		if storedURI == "" {
 			return errors.Newf("oid %q verified without object_uri", oid)
 		}
@@ -195,11 +156,11 @@ WHERE id = @id`,
 	return storedURI, nil
 }
 
-// GetObjectsByOIDs fetches verified Object rows for the given OIDs. Results are
-// keyed by OID, silently dropping missing OIDs.
-func (d *DB) GetObjectsByOIDs(ctx context.Context, oids []string) (map[string]Object, error) {
+// GetObjects fetches verified objects for the given OIDs. Results are keyed by
+// OID, silently dropping missing OIDs.
+func (d *DB) GetObjects(ctx context.Context, oids []string) (map[string]lfs.Object, error) {
 	if len(oids) == 0 {
-		return map[string]Object{}, nil
+		return map[string]lfs.Object{}, nil
 	}
 	var rows []Object
 	err := d.db.WithContext(ctx).Raw(`
@@ -210,19 +171,14 @@ WHERE oid = ANY(@oids) AND verified_at IS NOT NULL`,
 	if err != nil {
 		return nil, errors.Wrap(err, "select objects by OIDs")
 	}
-	out := make(map[string]Object, len(rows))
-	for _, r := range rows {
-		out[r.OID] = r
-	}
-	return out, nil
+	return verifiedObjectsByOID(rows), nil
 }
 
-// GetRepoObjectsByOIDs fetches verified Object rows for the given OIDs that are
-// linked to the repository. Results are keyed by OID, silently dropping missing
-// OIDs.
-func (d *DB) GetRepoObjectsByOIDs(ctx context.Context, repoName string, oids []string) (map[string]Object, error) {
+// GetRepoObjects fetches verified objects for the given OIDs that are linked to
+// the repository. Results are keyed by OID, silently dropping missing OIDs.
+func (d *DB) GetRepoObjects(ctx context.Context, repoName string, oids []string) (map[string]lfs.Object, error) {
 	if len(oids) == 0 {
-		return map[string]Object{}, nil
+		return map[string]lfs.Object{}, nil
 	}
 	var rows []Object
 	err := d.db.WithContext(ctx).Raw(`
@@ -238,11 +194,21 @@ AND objects.verified_at IS NOT NULL`,
 	if err != nil {
 		return nil, errors.Wrap(err, "select repo objects by OIDs")
 	}
-	out := make(map[string]Object, len(rows))
+	return verifiedObjectsByOID(rows), nil
+}
+
+// verifiedObjectsByOID converts verified rows, whose size and object_uri are
+// guaranteed non-null by the check_verified_consistency constraint.
+func verifiedObjectsByOID(rows []Object) map[string]lfs.Object {
+	out := make(map[string]lfs.Object, len(rows))
 	for _, r := range rows {
-		out[r.OID] = r
+		out[r.OID] = lfs.Object{
+			OID:  r.OID,
+			Size: *cmp.Or(r.Size, new(int64(-1))),
+			URI:  *cmp.Or(r.ObjectURI, new("")),
+		}
 	}
-	return out, nil
+	return out
 }
 
 // SweepOrphanObjects deletes up to limit pending objects (verified_at IS NULL)

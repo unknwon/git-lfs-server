@@ -18,6 +18,7 @@ import (
 	"unknwon.dev/git-lfs-server/internal/forge"
 	"unknwon.dev/git-lfs-server/internal/janitor"
 	"unknwon.dev/git-lfs-server/internal/strx"
+	"unknwon.dev/git-lfs-server/lfs"
 )
 
 // Set via ldflags.
@@ -59,11 +60,21 @@ func main() {
 
 	f.Get("/healthz", serveHealthz(logger.Scoped("healthz"), db))
 
+	services := make(map[string]*lfs.Service, len(config.Storages))
+	for host, backend := range config.Storages {
+		services[host] = &lfs.Service{
+			Store:          db,
+			Storage:        backend,
+			MaxObjectSize:  config.Server.MaxObjectSize,
+			CrossRepoDedup: true,
+		}
+	}
+	serve := serveLFS(logger.Scoped("lfs"), config.Server.ExternalURL, services)
 	f.Group("/{host}/{**}/info/lfs/objects", func() {
-		f.Post("/batch", serveBatch(logger.Scoped("batch"), db, config.Server.ExternalURL, config.Server.MaxObjectSize))
-		f.Get("/{oid}", serveDownload(logger.Scoped("download"), db, config.Storages))
-		f.Put("/{oid}", serveUpload(logger.Scoped("upload"), db, config.Storages, config.Server.MaxObjectSize))
-		f.Post("/verify", serveVerify(logger.Scoped("verify"), db, config.Storages))
+		f.Post("/batch", serve)
+		f.Get("/{oid}", serve)
+		f.Put("/{oid}", serve)
+		f.Post("/verify", serve)
 	}, authorize(logger.Scoped("authorize"), config.Forges))
 
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)

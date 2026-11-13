@@ -1,6 +1,7 @@
 package janitor
 
 import (
+	"cmp"
 	"context"
 	"strings"
 	"time"
@@ -9,8 +10,7 @@ import (
 	"unknwon.dev/x/logx"
 
 	"unknwon.dev/git-lfs-server/internal/database"
-	"unknwon.dev/git-lfs-server/internal/ptrx"
-	"unknwon.dev/git-lfs-server/internal/storage"
+	"unknwon.dev/git-lfs-server/lfs/storage"
 )
 
 const (
@@ -78,7 +78,7 @@ func (j *Janitor) Sweep(ctx context.Context, logger *logx.Logger) {
 func (j *Janitor) deleteObjects(ctx context.Context, logger *logx.Logger, objects []database.Object) {
 	var deletedCount, failedCount int
 	for _, o := range objects {
-		uri := ptrx.Deref(o.ObjectURI, "")
+		uri := *cmp.Or(o.ObjectURI, new(""))
 		if uri != "" {
 			if err := j.deleteByURI(ctx, uri); err != nil {
 				logger.ErrorContext(ctx, "Failed to delete object", "oid", o.OID, "uri", uri, "error", err)

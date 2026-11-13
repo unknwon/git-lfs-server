@@ -48,6 +48,11 @@ func (b *FilesystemBackend) storagePath(oid string) string {
 	return filepath.Join(b.root, oid[0:2], oid[2:4], oid)
 }
 
+// URI returns the file URI of the object under the storage root.
+func (b *FilesystemBackend) URI(oid string) string {
+	return b.uriFromPath(b.storagePath(oid))
+}
+
 func (b *FilesystemBackend) Put(ctx context.Context, oid string, r io.Reader) (string, error) {
 	if len(oid) < 4 {
 		return "", errors.Newf("invalid oid %q", oid)
@@ -85,6 +90,12 @@ func (b *FilesystemBackend) Put(ctx context.Context, oid string, r io.Reader) (s
 		return "", errors.Wrap(err, "create object dir")
 	}
 	if err = os.Rename(tmpPath, final); err != nil {
+		// On Windows, renaming onto a path that a concurrent upload of the same OID
+		// is renaming onto fails with "Access is denied". The content is addressed
+		// by its OID, so the other upload's file is just as good.
+		if _, statErr := os.Stat(final); statErr == nil {
+			return uri, nil
+		}
 		return "", errors.Wrap(err, "rename to final path")
 	}
 	return uri, nil
