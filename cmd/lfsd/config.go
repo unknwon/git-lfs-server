@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
-	"gopkg.in/ini.v1"
+	"unknwon.dev/ini/v2"
 
 	"unknwon.dev/git-lfs-server/internal/database"
 	"unknwon.dev/git-lfs-server/internal/embed"
@@ -34,13 +34,8 @@ type LogConfig struct {
 	Level string `ini:"LEVEL"`
 }
 
-const (
-	storageSectionPrefix = `storage "`
-	forgeSectionPrefix   = `forge "`
-)
-
 func loadConfig(customPath string) (*Config, error) {
-	f, err := ini.Load(embed.Config)
+	f, err := ini.Load(embed.Config, ini.ValueMapping(os.ExpandEnv))
 	if err != nil {
 		return nil, errors.Wrap(err, "load embedded config")
 	}
@@ -49,7 +44,6 @@ func loadConfig(customPath string) (*Config, error) {
 			return nil, errors.Wrapf(err, "load custom config %q", customPath)
 		}
 	}
-	f.ValueMapper = os.ExpandEnv
 
 	var c Config
 
@@ -64,15 +58,7 @@ func loadConfig(customPath string) (*Config, error) {
 	}
 
 	backendsByName := make(map[string]storage.Backend)
-	for _, s := range f.Sections() {
-		rest, ok := strings.CutPrefix(s.Name(), storageSectionPrefix)
-		if !ok {
-			continue
-		}
-		name, ok := strings.CutSuffix(rest, `"`)
-		if !ok {
-			return nil, errors.Newf("malformed storage section name %q", s.Name())
-		}
+	for name, s := range f.Subsections("storage") {
 		if _, dup := backendsByName[name]; dup {
 			return nil, errors.Newf("duplicate storage configuration for name %q", name)
 		}
@@ -110,15 +96,7 @@ func loadConfig(customPath string) (*Config, error) {
 
 	c.Forges = make(map[string]forge.Provider)
 	c.Storages = make(map[string]storage.Backend)
-	for _, s := range f.Sections() {
-		rest, ok := strings.CutPrefix(s.Name(), forgeSectionPrefix)
-		if !ok {
-			continue
-		}
-		host, ok := strings.CutSuffix(rest, `"`)
-		if !ok {
-			return nil, errors.Newf("malformed forge section name %q", s.Name())
-		}
+	for host, s := range f.Subsections("forge") {
 		host = strings.ToLower(host)
 		if _, dup := c.Forges[host]; dup {
 			return nil, errors.Newf("duplicate forge configuration for host %q", host)
