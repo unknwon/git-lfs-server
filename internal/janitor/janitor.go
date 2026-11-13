@@ -20,7 +20,7 @@ const (
 )
 
 // Janitor sweeps orphan (never verified) and unreferenced (repo_count = 0)
-// objects.
+// objects, and abandoned presigned uploads.
 type Janitor struct {
 	db       *database.DB
 	storages []storage.Backend
@@ -58,9 +58,11 @@ func (j *Janitor) Run(ctx context.Context, logger *logx.Logger) {
 	}
 }
 
-// Sweep runs both cleanup passes once. Errors are logged but not returned.
+// Sweep runs all cleanup passes once. Errors are logged but not returned.
 // The next tick will retry.
 func (j *Janitor) Sweep(ctx context.Context, logger *logx.Logger) {
+	j.deleteUploads(ctx, logger.Scoped("uploads"), time.Now().Add(-orphanAge))
+
 	if objects, err := j.db.SweepOrphanObjects(ctx, orphanAge, sweepBatchSize); err != nil {
 		logger.ErrorContext(ctx, "Failed to sweep orphan objects", "error", err)
 	} else if len(objects) > 0 {
@@ -111,6 +113,23 @@ func (j *Janitor) deleteObjects(ctx context.Context, logger *logx.Logger, object
 		logFn = logger.ErrorContext
 	}
 	logFn(ctx, "Swept objects", "deletedCount", deletedCount, "failedCount", failedCount)
+}
+
+// deleteUploads deletes the content of presigned uploads last modified before
+// the cutoff, which were never verified or failed to be deleted after.
+func (j *Janitor) deleteUploads(ctx context.Context, logger *logx.Logger, before time.Time) {
+	for _, b := range j.storages {
+		p, ok := b.(storage.Presigner)
+		if !ok {
+			continue
+		}
+		deletedCount, err := p.DeleteUploads(ctx, before)
+		if err != nil {
+			logger.ErrorContext(ctx, "Failed to delete stale uploads", "storage", b.Name(), "deletedCount", deletedCount, "error", err)
+		} else if deletedCount > 0 {
+			logger.InfoContext(ctx, "Deleted stale uploads", "storage", b.Name(), "deletedCount", deletedCount)
+		}
+	}
 }
 
 func (j *Janitor) deleteByURI(ctx context.Context, uri string) error {

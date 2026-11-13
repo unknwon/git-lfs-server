@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/cockroachdb/errors"
 )
@@ -53,15 +54,29 @@ type Proxier interface {
 
 // Presigner is implemented by backends that validate object integrity when
 // directly uploading from clients, and reject uploads with mismatched content.
+//
+// Each upload goes to its own upload location, so that an object at an upload
+// location proves that the upload happened. The server copies the content to
+// the canonical location of the object once the upload is verified.
 type Presigner interface {
 	Backend
 
-	// PresignPut returns a short-lived URL the client PUTs to, along with the
-	// headers the client MUST send verbatim.
-	PresignPut(ctx context.Context, oid string, size int64) (url string, headers map[string]string, err error)
+	// UploadURI returns the location that the upload with the given ID sends the
+	// content of oid to. Pure function, safe to compute without I/O.
+	UploadURI(uploadID, oid string) string
+	// PresignPut returns a short-lived URL the client PUTs the content of oid to,
+	// along with the headers the client MUST send verbatim. The object is stored
+	// at uri, and only when the content matches oid and size.
+	PresignPut(ctx context.Context, uri, oid string, size int64) (url string, headers map[string]string, err error)
 	// PresignGet returns a short-lived URL the client GETs from.
 	PresignGet(ctx context.Context, uri string) (url string, err error)
 	// Head returns the size of the object. It returns ErrNotFound when no matching
 	// object exists.
 	Head(ctx context.Context, uri string) (size int64, err error)
+	// Copy copies the object of size bytes at srcURI to dstURI within the
+	// storage, replacing any object at dstURI.
+	Copy(ctx context.Context, srcURI, dstURI string, size int64) error
+	// DeleteUploads deletes the objects at upload locations that were last
+	// modified before the cutoff, and returns how many it deleted.
+	DeleteUploads(ctx context.Context, before time.Time) (deleted int, err error)
 }

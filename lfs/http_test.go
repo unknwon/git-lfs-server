@@ -77,9 +77,19 @@ func TestService_Serve(t *testing.T) {
 	})
 
 	t.Run("presigned transfer redirects", func(t *testing.T) {
-		s := &Service{Store: newMemStore(), Storage: newS3PresignBackend(t)}
+		b, listKeys := newS3PresignBackend(t)
+		s := &Service{Store: newMemStore(), Storage: b}
 
-		w := serve(s, readWrite, http.MethodPut, "/"+oid, "")
+		w := serve(s, readWrite, http.MethodPost, "/batch", batch(OperationUpload))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var batchResp BatchResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &batchResp))
+		require.Len(t, batchResp.Objects, 1)
+		uploadQuery := "?upload=" + uploadIDOf(t, batchResp.Objects[0])
+
+		requireError(t, serve(s, readWrite, http.MethodPost, "/verify"+uploadQuery, verify), http.StatusUnprocessableEntity)
+
+		w = serve(s, readWrite, http.MethodPut, "/"+oid+uploadQuery, "")
 		require.Equal(t, http.StatusTemporaryRedirect, w.Code, w.Body.String())
 		assert.Equal(t, "97OiZ/pYWtQ/MOiPfTFzQY0nD/6zXoSoWwc00FhqN48=", w.Header().Get("x-amz-checksum-sha256"))
 
@@ -91,8 +101,9 @@ func TestService_Serve(t *testing.T) {
 		require.NoError(t, resp.Body.Close())
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 
-		w = serve(s, readWrite, http.MethodPost, "/verify", verify)
+		w = serve(s, readWrite, http.MethodPost, "/verify"+uploadQuery, verify)
 		require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+		assert.Equal(t, []string{oid}, listKeys())
 
 		w = serve(s, readWrite, http.MethodGet, "/"+oid, "")
 		require.Equal(t, http.StatusTemporaryRedirect, w.Code, w.Body.String())
@@ -102,6 +113,15 @@ func TestService_Serve(t *testing.T) {
 		require.NoError(t, resp.Body.Close())
 		require.NoError(t, err)
 		assert.Equal(t, content, string(got))
+	})
+
+	t.Run("presigned transfer requires an upload ID", func(t *testing.T) {
+		b, _ := newS3PresignBackend(t)
+		s := &Service{Store: newMemStore(), Storage: b}
+		for _, query := range []string{"", "?upload=", "?upload=not-a-uuid"} {
+			requireError(t, serve(s, readWrite, http.MethodPut, "/"+oid+query, ""), http.StatusBadRequest)
+			requireError(t, serve(s, readWrite, http.MethodPost, "/verify"+query, verify), http.StatusBadRequest)
+		}
 	})
 
 	t.Run("checks permissions", func(t *testing.T) {
@@ -116,7 +136,7 @@ func TestService_Serve(t *testing.T) {
 		requireError(t, serve(s, writeOnly, http.MethodPost, "/batch", batch(OperationDownload)), http.StatusForbidden)
 		requireError(t, serve(s, writeOnly, http.MethodGet, "/"+oid, ""), http.StatusForbidden)
 
-		_, err := s.Upload(t.Context(), discardLogger, "repo", oid, int64(size), strings.NewReader(content))
+		_, err := s.Upload(t.Context(), discardLogger, "repo", oid, "", int64(size), strings.NewReader(content))
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, serve(s, readOnly, http.MethodGet, "/"+oid, "").Code)
 	})

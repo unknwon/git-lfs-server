@@ -63,10 +63,9 @@ func main() {
 	services := make(map[string]*lfs.Service, len(config.Storages))
 	for host, backend := range config.Storages {
 		services[host] = &lfs.Service{
-			Store:          db,
-			Storage:        backend,
-			MaxObjectSize:  config.Server.MaxObjectSize,
-			CrossRepoDedup: true,
+			Store:         db,
+			Storage:       backend,
+			MaxObjectSize: config.Server.MaxObjectSize,
 		}
 	}
 	serve := serveLFS(logger.Scoped("lfs"), config.Server.ExternalURL, services)

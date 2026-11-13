@@ -47,6 +47,8 @@ ENDPOINT = https://${LFSD_R2_ACCOUNT_ID}.r2.cloudflarestorage.com
 
 At least one `[forge "{host}"]` section must be configured. Each forge references a `[storage "{name}"]` section by name. Multiple forges may share a single storage backend. Supported storage types are `filesystem` and `s3-presign` (compatible with S3, R2, DigitalOcean Spaces, etc.).
 
+An `s3-presign` bucket also holds in-progress uploads under the `uploads/` prefix. They are moved into place when the client verifies the upload, and abandoned ones are deleted automatically after a day.
+
 ### Client
 
 Git LFS resolves the LFS endpoint per repository. To point a clone at lfsd, set `lfs.url` in the repository's `.lfsconfig` (committed so collaborators inherit it) to `EXTERNAL_URL` joined with the forge host, the repository path, and the `/info/lfs` suffix:

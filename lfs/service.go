@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
+	"github.com/google/uuid"
 
 	"unknwon.dev/git-lfs-server/lfs/internal/iox"
 	"unknwon.dev/git-lfs-server/lfs/storage"
@@ -35,16 +36,13 @@ type Service struct {
 	// MaxObjectSize is the maximum size in bytes of an uploaded object. Zero or
 	// negative means no limit.
 	MaxObjectSize int64
-	// CrossRepoDedup allows an upload to be satisfied by an object that is
-	// already stored for another repository, without the client sending the
-	// content again. Without it, a repository only gains an object by uploading
-	// its full content, so knowing an OID and its size is not enough to read the
-	// object through a repository the client has write access to.
-	CrossRepoDedup bool
 }
 
 // Endpoint describes how the client reaches the transfer endpoints of a
-// repository: objects at Href/{oid} and verifications at Href/verify.
+// repository: objects at Href/{oid} and verifications at Href/verify. For a
+// storage.Presigner, the upload and verify actions also carry an upload ID in
+// the "upload" query parameter, which the caller passes to Service.Upload and
+// Service.Verify.
 type Endpoint struct {
 	Href string
 	// Header is included in every action, e.g., to forward the credentials of
@@ -82,19 +80,11 @@ func (s *Service) Batch(ctx context.Context, logger *slog.Logger, repo string, e
 		oids[i] = o.OID
 	}
 
-	var (
-		existing map[string]Object
-		err      error
-	)
-	switch req.Operation {
-	case OperationDownload:
-		existing, err = s.Store.GetRepoObjects(ctx, repo, oids)
-	case OperationUpload:
-		existing, err = s.uploadedObjects(ctx, repo, oids)
-	}
+	existing, err := s.Store.GetRepoObjects(ctx, repo, oids)
 	if err != nil {
 		return nil, errors.Wrap(err, "look up objects")
 	}
+	_, presigned := s.Storage.(storage.Presigner)
 
 	objectHref := func(oid string) string { return endpoint.Href + "/" + oid }
 	resp := &BatchResponse{
@@ -125,15 +115,7 @@ func (s *Service) Batch(ctx context.Context, logger *slog.Logger, repo string, e
 					Message: fmt.Sprintf("object size %d exceeds limit %d", in.Size, s.MaxObjectSize),
 				}
 			case ok && obj.Size == in.Size:
-				// No actions tell the client the object needs no upload. With
-				// cross-repo dedup, the object may only be linked to another
-				// repository so far.
-				if s.CrossRepoDedup {
-					if _, err := s.Store.LinkObject(ctx, repo, in.OID, in.Size, obj.URI); err != nil {
-						logger.ErrorContext(ctx, "Failed to link repo to existing object", "oid", in.OID, "error", err)
-						out.Error = &ObjectError{Code: http.StatusInternalServerError, Message: "failed to link object to repo"}
-					}
-				}
+				// No actions tell the client the object needs no upload.
 			case ok && obj.Size != in.Size:
 				out.Error = &ObjectError{Code: http.StatusConflict, Message: "OID exists with different size"}
 			default:
@@ -146,9 +128,19 @@ func (s *Service) Batch(ctx context.Context, logger *slog.Logger, repo string, e
 				// Presigned uploads require the client to send the checksum that
 				// the storage verifies the content against.
 				uploadHeader["x-amz-checksum-sha256"] = base64.StdEncoding.EncodeToString(rawOID)
+				uploadHref, verifyHref := objectHref(in.OID), endpoint.Href+"/verify"
+				if presigned {
+					uploadID, err := uuid.NewV7()
+					if err != nil {
+						return nil, errors.Wrap(err, "generate upload ID")
+					}
+					query := "?" + uploadQueryParam + "=" + uploadID.String()
+					uploadHref += query
+					verifyHref += query
+				}
 				out.Actions = map[string]Action{
-					"upload": {Href: objectHref(in.OID), Header: uploadHeader},
-					"verify": {Href: endpoint.Href + "/verify", Header: endpoint.Header},
+					"upload": {Href: uploadHref, Header: uploadHeader},
+					"verify": {Href: verifyHref, Header: endpoint.Header},
 				}
 			}
 		}
@@ -157,37 +149,33 @@ func (s *Service) Batch(ctx context.Context, logger *slog.Logger, repo string, e
 	return resp, nil
 }
 
-// uploadedObjects returns the verified objects among oids that an upload to
-// repo does not need to send again.
-func (s *Service) uploadedObjects(ctx context.Context, repo string, oids []string) (map[string]Object, error) {
-	if s.CrossRepoDedup {
-		objects, err := s.Store.GetObjects(ctx, oids)
-		if err != nil {
-			return nil, errors.Wrap(err, "get objects")
-		}
-		return objects, nil
-	}
-	objects, err := s.Store.GetRepoObjects(ctx, repo, oids)
-	if err != nil {
-		return nil, errors.Wrap(err, "get repository objects")
-	}
-	return objects, nil
-}
-
 // UploadResult is the outcome of a successful Service.Upload.
 type UploadResult struct {
 	// Redirect is set when the client must upload the content to another
 	// location and then call the verify endpoint.
 	Redirect *Redirect
-	// Existed reports that the object was already stored and the content was not
-	// read.
-	Existed bool
+}
+
+// uploadQueryParam is the query parameter of the upload and verify actions that
+// carries the upload ID for a storage.Presigner.
+const uploadQueryParam = "upload"
+
+// validateUploadID checks that uploadID has the form of the upload IDs issued
+// by Service.Batch, so that it is safe to use in storage locations.
+func validateUploadID(uploadID string) error {
+	id, err := uuid.Parse(uploadID)
+	if err != nil || id.Version() != 7 || uploadID != id.String() {
+		return &Error{Code: http.StatusBadRequest, Message: "invalid upload ID"}
+	}
+	return nil
 }
 
 // Upload handles an upload of size bytes for oid to repo. For a
 // storage.Proxier, it stores the content read from body after verifying its
-// size and hash. For a storage.Presigner, it does not read body.
-func (s *Service) Upload(ctx context.Context, logger *slog.Logger, repo, oid string, size int64, body io.Reader) (*UploadResult, error) {
+// size and hash, and ignores uploadID. For a storage.Presigner, it does not
+// read body and redirects the client to the upload location of uploadID, the
+// upload ID from the action that Service.Batch returned.
+func (s *Service) Upload(ctx context.Context, logger *slog.Logger, repo, oid, uploadID string, size int64, body io.Reader) (*UploadResult, error) {
 	if !ValidOID(oid) {
 		return nil, &Error{Code: http.StatusBadRequest, Message: "invalid oid"}
 	}
@@ -205,7 +193,7 @@ func (s *Service) Upload(ctx context.Context, logger *slog.Logger, repo, oid str
 	case storage.Proxier:
 		return s.uploadProxy(ctx, logger, b, repo, oid, size, body)
 	case storage.Presigner:
-		return s.uploadPresign(ctx, b, repo, oid, size)
+		return uploadPresign(ctx, b, oid, uploadID, size)
 	default:
 		return nil, errors.Newf("storage backend %T does not implement a known transfer mode", s.Storage)
 	}
@@ -245,19 +233,11 @@ func (s *Service) uploadProxy(ctx context.Context, logger *slog.Logger, backend 
 	return &UploadResult{}, nil
 }
 
-func (s *Service) uploadPresign(ctx context.Context, backend storage.Presigner, repo, oid string, size int64) (*UploadResult, error) {
-	existing, err := s.uploadedObjects(ctx, repo, []string{oid})
-	if err != nil {
-		return nil, errors.Wrap(err, "look up object")
+func uploadPresign(ctx context.Context, backend storage.Presigner, oid, uploadID string, size int64) (*UploadResult, error) {
+	if err := validateUploadID(uploadID); err != nil {
+		return nil, err
 	}
-	if _, ok := existing[oid]; ok {
-		return &UploadResult{Existed: true}, nil
-	}
-
-	if err = s.Store.InsertPendingObject(ctx, oid); err != nil {
-		return nil, errors.Wrap(err, "insert pending object")
-	}
-	url, header, err := backend.PresignPut(ctx, oid, size)
+	url, header, err := backend.PresignPut(ctx, backend.UploadURI(uploadID, oid), oid, size)
 	if err != nil {
 		return nil, errors.Wrap(err, "presign upload")
 	}
@@ -330,8 +310,12 @@ func (s *Service) backendFor(uri string) storage.Backend {
 }
 
 // Verify handles the verification of an upload to repo. A presigned upload
-// becomes downloadable only after it is verified.
-func (s *Service) Verify(ctx context.Context, logger *slog.Logger, repo string, req VerifyRequest) error {
+// becomes downloadable only after it is verified, which requires the content
+// at the upload location of uploadID, like Service.Upload. Each upload
+// location is only used once, so a repository only gains an object by
+// uploading its content, even when the object is already stored for another
+// repository.
+func (s *Service) Verify(ctx context.Context, logger *slog.Logger, repo, uploadID string, req VerifyRequest) error {
 	if !ValidOID(req.OID) {
 		return &Error{Code: http.StatusBadRequest, Message: "invalid oid"}
 	}
@@ -340,7 +324,7 @@ func (s *Service) Verify(ctx context.Context, logger *slog.Logger, repo string, 
 	case storage.Proxier:
 		return s.verifyProxy(ctx, repo, req)
 	case storage.Presigner:
-		return s.verifyPresign(ctx, logger, b, repo, req)
+		return s.verifyPresign(ctx, logger, b, repo, uploadID, req)
 	default:
 		return errors.Newf("storage backend %T does not implement a known transfer mode", s.Storage)
 	}
@@ -361,20 +345,38 @@ func (s *Service) verifyProxy(ctx context.Context, repo string, req VerifyReques
 	return nil
 }
 
-func (s *Service) verifyPresign(ctx context.Context, logger *slog.Logger, backend storage.Presigner, repo string, req VerifyRequest) error {
-	uri := backend.URI(req.OID)
-	headSize, err := backend.Head(ctx, uri)
+func (s *Service) verifyPresign(ctx context.Context, logger *slog.Logger, backend storage.Presigner, repo, uploadID string, req VerifyRequest) error {
+	if err := validateUploadID(uploadID); err != nil {
+		return err
+	}
+	uploadURI := backend.UploadURI(uploadID, req.OID)
+	uploadSize, err := backend.Head(ctx, uploadURI)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			return &Error{Code: http.StatusUnprocessableEntity, Message: "object does not exist in storage"}
 		}
-		return errors.Wrap(err, "head object")
+		return errors.Wrap(err, "head upload")
 	}
 	// The presigned upload signs Content-Length, which should make this
 	// impossible, but treat any mismatch as a hard error rather than trusting
 	// either side.
-	if headSize != req.Size {
+	if uploadSize != req.Size {
 		return &Error{Code: http.StatusUnprocessableEntity, Message: "size mismatch"}
+	}
+
+	// Record the object before its content reaches the canonical location, so
+	// that the content is cleaned up if verification fails from here on.
+	if err = s.Store.InsertPendingObject(ctx, req.OID); err != nil {
+		return errors.Wrap(err, "insert pending object")
+	}
+	uri := backend.URI(req.OID)
+	if _, err = backend.Head(ctx, uri); err != nil {
+		if !errors.Is(err, storage.ErrNotFound) {
+			return errors.Wrap(err, "head object")
+		}
+		if err = backend.Copy(ctx, uploadURI, uri, req.Size); err != nil {
+			return errors.Wrap(err, "copy upload to object")
+		}
 	}
 
 	storedURI, err := s.Store.VerifyObject(ctx, repo, req.OID, req.Size, uri)
@@ -385,6 +387,9 @@ func (s *Service) verifyPresign(ctx context.Context, logger *slog.Logger, backen
 		if err := backend.Delete(ctx, uri); err != nil {
 			logger.ErrorContext(ctx, "Failed to delete orphan object", "uri", uri, "error", err)
 		}
+	}
+	if err := backend.Delete(ctx, uploadURI); err != nil {
+		logger.ErrorContext(ctx, "Failed to delete upload", "uri", uploadURI, "error", err)
 	}
 	return nil
 }

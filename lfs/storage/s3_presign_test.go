@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -29,10 +30,10 @@ const (
 // test bucket, and returns an S3PresignBackend pointed at the fake. The
 // fake's Server http.Handler accepts S3 API calls from any aws-sdk-go-v2
 // client configured with path-style and a custom BaseEndpoint.
-func newTestS3PresignBackend(t *testing.T) (*S3PresignBackend, *httptest.Server) {
+func newTestS3PresignBackend(t *testing.T, opts ...s3mem.Option) (*S3PresignBackend, *httptest.Server) {
 	t.Helper()
 
-	mem := s3mem.New()
+	mem := s3mem.New(opts...)
 	require.NoError(t, mem.CreateBucket(testBucket))
 
 	srv := httptest.NewServer(gofakes3.New(mem).Server())
@@ -52,6 +53,7 @@ func TestS3PresignBackend_URI(t *testing.T) {
 	b, _ := newTestS3PresignBackend(t)
 	oid := sha256Hex("uri-test")
 	assert.Equal(t, "r2://"+testBucket+"/"+oid, b.URI(oid))
+	assert.Equal(t, "r2://"+testBucket+"/uploads/upload-id/"+oid, b.UploadURI("upload-id", oid))
 }
 
 func TestS3PresignBackend_PresignPut(t *testing.T) {
@@ -60,7 +62,8 @@ func TestS3PresignBackend_PresignPut(t *testing.T) {
 	oid := sha256Hex(body)
 	size := int64(len(body))
 
-	url, headers, err := b.PresignPut(t.Context(), oid, size)
+	uploadURI := b.UploadURI("upload-id", oid)
+	url, headers, err := b.PresignPut(t.Context(), uploadURI, oid, size)
 	require.NoError(t, err)
 
 	rawOID, err := hex.DecodeString(oid)
@@ -90,9 +93,11 @@ func TestS3PresignBackend_PresignPut(t *testing.T) {
 		_ = resp.Body.Close()
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 
-		gotSize, err := b.Head(t.Context(), b.URI(oid))
+		gotSize, err := b.Head(t.Context(), uploadURI)
 		require.NoError(t, err)
 		assert.Equal(t, size, gotSize)
+		_, err = b.Head(t.Context(), b.URI(oid))
+		assert.True(t, errors.Is(err, ErrNotFound), "only the upload location is written")
 	})
 }
 
@@ -195,6 +200,90 @@ func TestS3PresignBackend_Delete(t *testing.T) {
 		uri := b.URI(sha256Hex("never-existed"))
 		require.NoError(t, b.Delete(t.Context(), uri))
 	})
+}
+
+func TestS3PresignBackend_Copy(t *testing.T) {
+	b, _ := newTestS3PresignBackend(t)
+	body := "copy me"
+	oid := sha256Hex(body)
+	src := b.UploadURI("upload-id", oid)
+	putObject(t, b, "uploads/upload-id/"+oid, body)
+
+	require.NoError(t, b.Copy(t.Context(), src, b.URI(oid), int64(len(body))))
+	assert.Equal(t, body, getObject(t, b, oid))
+	_, err := b.Head(t.Context(), src)
+	require.NoError(t, err, "the source is kept")
+
+	err = b.Copy(t.Context(), b.UploadURI("missing", oid), b.URI(sha256Hex("other")), 1)
+	require.Error(t, err)
+}
+
+func TestCopyPartRanges(t *testing.T) {
+	tests := []struct {
+		name           string
+		size, partSize int64
+		want           []string
+	}{
+		{"remainder in last part", 10, 4, []string{"bytes=0-3", "bytes=4-7", "bytes=8-9"}},
+		{"exact multiple", 8, 4, []string{"bytes=0-3", "bytes=4-7"}},
+		{"smaller than a part", 1, 4, []string{"bytes=0-0"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, copyPartRanges(tc.size, tc.partSize))
+		})
+	}
+
+	t.Run("just over the CopyObject limit", func(t *testing.T) {
+		ranges := copyPartRanges(maxCopyObjectSize+1, copyPartSize)
+		require.Len(t, ranges, 11)
+		assert.Equal(t, "bytes=0-536870911", ranges[0])
+		assert.Equal(t, "bytes=5368709120-5368709120", ranges[10])
+	})
+}
+
+func TestS3PresignBackend_DeleteUploads(t *testing.T) {
+	clock := gofakes3.FixedTimeSource(time.Now())
+	b, _ := newTestS3PresignBackend(t, s3mem.WithTimeSource(clock))
+	oid := sha256Hex("upload")
+	putObject(t, b, "uploads/stale/"+oid, "upload")
+	putObject(t, b, oid, "upload")
+	clock.Advance(2 * time.Hour)
+	putObject(t, b, "uploads/recent/"+oid, "upload")
+
+	deleted, err := b.DeleteUploads(t.Context(), clock.Now().Add(-time.Hour))
+	require.NoError(t, err)
+	assert.Equal(t, 1, deleted)
+
+	_, err = b.Head(t.Context(), b.UploadURI("stale", oid))
+	assert.True(t, errors.Is(err, ErrNotFound), "a stale upload is deleted")
+	_, err = b.Head(t.Context(), b.UploadURI("recent", oid))
+	assert.NoError(t, err, "a recent upload is kept")
+	_, err = b.Head(t.Context(), b.URI(oid))
+	assert.NoError(t, err, "an object outside uploads/ is kept regardless of its age")
+}
+
+func putObject(t *testing.T, b *S3PresignBackend, key, body string) {
+	t.Helper()
+	_, err := b.client.PutObject(t.Context(), &s3.PutObjectInput{
+		Bucket: aws.String(testBucket),
+		Key:    aws.String(key),
+		Body:   strings.NewReader(body),
+	})
+	require.NoError(t, err)
+}
+
+func getObject(t *testing.T, b *S3PresignBackend, key string) string {
+	t.Helper()
+	out, err := b.client.GetObject(t.Context(), &s3.GetObjectInput{
+		Bucket: aws.String(testBucket),
+		Key:    aws.String(key),
+	})
+	require.NoError(t, err)
+	defer func() { _ = out.Body.Close() }()
+	got, err := io.ReadAll(out.Body)
+	require.NoError(t, err)
+	return string(got)
 }
 
 func TestNewS3PresignBackend(t *testing.T) {

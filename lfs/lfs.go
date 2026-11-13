@@ -12,6 +12,13 @@
 // content through the server, and a storage.Presigner backend (e.g.,
 // storage.S3PresignBackend) redirects clients to the storage.
 //
+// An OID is not secret, because pointer files carry it in plain text. So a
+// repository only gains an object by uploading its content, even when the
+// object is already stored for another repository. Storage keeps one copy of
+// each object, shared by the repositories it is linked to. A presigned upload
+// goes to its own upload location, and verification copies it to the location
+// of the object.
+//
 // [Service.Serve] handles the HTTP requests of the batch, upload, download,
 // and verify endpoints. The caller routes the requests, authenticates them,
 // and passes an [Access] with the repository, the base URL of its endpoints,
@@ -121,24 +128,22 @@ type Object struct {
 }
 
 // Store is the metadata layer of LFS objects. An object is "pending" from the
-// start of a presigned upload until it is verified, and only verified objects
-// are served. A repository is identified by an opaque string chosen by the
-// caller.
+// verification of a presigned upload until the verification succeeds, and only
+// verified objects are served. A repository is identified by an opaque string
+// chosen by the caller.
 type Store interface {
 	// GetRepoObjects returns the verified objects among oids that are linked to
 	// repo, keyed by OID. Missing OIDs are omitted.
 	GetRepoObjects(ctx context.Context, repo string, oids []string) (map[string]Object, error)
-	// GetObjects returns the verified objects among oids regardless of the
-	// repositories they are linked to, keyed by OID. Missing OIDs are omitted.
-	// It is only called when Service.CrossRepoDedup is true.
-	GetObjects(ctx context.Context, oids []string) (map[string]Object, error)
 	// LinkObject records a verified object whose content is stored at uri and
 	// links it to repo. It returns the URI the object is recorded with, and when
 	// that differs from uri, the caller deletes the content at uri as no longer
 	// referenced.
 	LinkObject(ctx context.Context, repo, oid string, size int64, uri string) (storedURI string, err error)
 	// InsertPendingObject records a pending object for oid, unless the object is
-	// already recorded, so that abandoned presigned uploads can be cleaned up.
+	// already recorded. It is called before the content of a presigned upload is
+	// copied to the canonical location of the object, so that the content can be
+	// cleaned up when the verification does not complete.
 	InsertPendingObject(ctx context.Context, oid string) error
 	// VerifyObject marks the pending object for oid as verified with content
 	// stored at uri and links it to repo. It returns the URI the object is
