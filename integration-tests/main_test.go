@@ -3,13 +3,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,9 +22,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/sourcegraph/run"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.bobheadxi.dev/streamline/streamexec"
+
+	"unknwon.dev/git-lfs-server/lfs"
 )
 
 var long = flag.Bool("long", false, "run long-running integration tests")
@@ -67,10 +76,10 @@ func TestUploadDownloadRoundtrip(t *testing.T) {
 	})
 
 	pushDir := t.TempDir()
-	blob := genRandomBlob(t, 1*1024*1024)
-	wantSum := sha256.Sum256(blob)
+	content := genRandomContent(t, 1*1024*1024)
+	wantSum := sha256.Sum256(content)
 
-	require.NoError(t, os.WriteFile(filepath.Join(pushDir, "large.bin"), blob, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(pushDir, "large.bin"), content, 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(pushDir, ".gitattributes"),
 		[]byte("*.bin filter=lfs diff=lfs merge=lfs -text\n"), 0o644))
 
@@ -85,21 +94,91 @@ func TestUploadDownloadRoundtrip(t *testing.T) {
 	git("remote", "add", "origin", remoteURL)
 	git("push", "origin", "HEAD:refs/heads/"+branch)
 
-	// Skip smudge during clone so the LFS object isn't fetched as a side effect of
-	// checkout. Then explicitly pull to exercise the download path against lfsd.
-	pullDir := t.TempDir()
-	require.NoError(t,
-		run.Cmd(ctx, "git", "clone", "--branch", branch, "--depth", "1", remoteURL, pullDir).
-			Environ([]string{"GIT_LFS_SKIP_SMUDGE=1", "GIT_TERMINAL_PROMPT=0"}).Run().Wait())
+	oid := hex.EncodeToString(wantSum[:])
+	// Check out in a fresh clone, so the smudge filter downloads the LFS object
+	// from lfsd.
+	requireClone := func(lfsURL string) {
+		t.Helper()
+		cloneDir := t.TempDir()
+		require.NoError(t,
+			run.Cmd(ctx, "git", "clone", "--no-checkout", "--branch", branch, "--depth", "1", remoteURL, cloneDir).
+				Environ([]string{"GIT_TERMINAL_PROMPT=0"}).Run().Wait())
+		cloneGit := gitCmd(ctx, t, cloneDir)
+		cloneGit("config", "lfs.url", lfsURL)
+		cloneGit("checkout", branch)
+		got, err := os.ReadFile(filepath.Join(cloneDir, "large.bin"))
+		require.NoError(t, err)
+		require.True(t, bytes.Equal(content, got), "downloaded content differs from the pushed content")
+	}
+	requireClone(lfsURL)
 
-	pullGit := gitCmd(ctx, t, pullDir)
-	pullGit("config", "lfs.url", lfsURL)
-	pullGit("lfs", "pull")
+	// The same object in another repository is only linked to it by uploading
+	// the content again.
+	otherLFSURL := "http://x:x@127.0.0.1:3356/local.test/unknwon/git-lfs-test/info/lfs"
+	resp := batch(ctx, t, otherLFSURL, lfs.BatchRequest{
+		Operation: lfs.OperationDownload,
+		Objects:   []lfs.BatchObject{{OID: oid, Size: int64(len(content))}},
+	})
+	require.NotNil(t, resp.Objects[0].Error, "another repository must not download the object before uploading it")
+	resp = batch(ctx, t, otherLFSURL, lfs.BatchRequest{
+		Operation: lfs.OperationUpload,
+		Objects:   []lfs.BatchObject{{OID: oid, Size: int64(len(content))}},
+	})
+	require.Contains(t, resp.Objects[0].Actions, "upload", "another repository must upload the object")
 
-	got, err := os.ReadFile(filepath.Join(pullDir, "large.bin"))
+	git("config", "lfs.url", otherLFSURL)
+	git("lfs", "push", "--object-id", "origin", oid)
+	requireClone(otherLFSURL)
+
+	// Both repositories share one copy, and no upload is left behind.
+	client := s3.NewFromConfig(aws.Config{
+		Region: "auto",
+		Credentials: credentials.NewStaticCredentialsProvider(
+			os.Getenv("LFSD_R2_ACCESS_KEY_ID"), os.Getenv("LFSD_R2_SECRET_ACCESS_KEY"), ""),
+	}, func(o *s3.Options) {
+		o.BaseEndpoint = aws.String(fmt.Sprintf("https://%s.r2.cloudflarestorage.com", os.Getenv("LFSD_R2_ACCOUNT_ID")))
+		o.UsePathStyle = true
+	})
+	bucket := aws.String(os.Getenv("LFSD_R2_BUCKET"))
+	head, err := client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: bucket, Key: aws.String(oid)})
 	require.NoError(t, err)
-	gotSum := sha256.Sum256(got)
-	require.Equal(t, hex.EncodeToString(wantSum[:]), hex.EncodeToString(gotSum[:]))
+	assert.Equal(t, int64(len(content)), aws.ToInt64(head.ContentLength))
+	pages := s3.NewListObjectsV2Paginator(client, &s3.ListObjectsV2Input{Bucket: bucket, Prefix: aws.String("uploads/")})
+	for pages.HasMorePages() {
+		page, err := pages.NextPage(ctx)
+		require.NoError(t, err)
+		for _, o := range page.Contents {
+			assert.False(t, strings.HasSuffix(aws.ToString(o.Key), "/"+oid), "upload %q is left behind", aws.ToString(o.Key))
+		}
+	}
+}
+
+// batch sends a batch request to the LFS endpoint at lfsURL, whose user info
+// is sent as HTTP Basic Auth credentials.
+func batch(ctx context.Context, t *testing.T, lfsURL string, req lfs.BatchRequest) *lfs.BatchResponse {
+	t.Helper()
+	u, err := url.Parse(lfsURL + "/objects/batch")
+	require.NoError(t, err)
+	password, _ := u.User.Password()
+	username := u.User.Username()
+	u.User = nil
+
+	body, err := json.Marshal(req)
+	require.NoError(t, err)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), bytes.NewReader(body))
+	require.NoError(t, err)
+	httpReq.SetBasicAuth(username, password)
+	httpReq.Header.Set("Content-Type", lfs.MediaType)
+	httpReq.Header.Set("Accept", lfs.MediaType)
+	httpResp, err := http.DefaultClient.Do(httpReq)
+	require.NoError(t, err)
+	defer func() { _ = httpResp.Body.Close() }()
+	require.Equal(t, http.StatusOK, httpResp.StatusCode)
+
+	var resp lfs.BatchResponse
+	require.NoError(t, json.NewDecoder(httpResp.Body).Decode(&resp))
+	require.Len(t, resp.Objects, len(req.Objects))
+	return &resp
 }
 
 func requireEnv(t *testing.T, names ...string) {
@@ -213,7 +292,7 @@ func gitCmd(ctx context.Context, t *testing.T, dir string) func(args ...string) 
 	}
 }
 
-func genRandomBlob(t *testing.T, size int) []byte {
+func genRandomContent(t *testing.T, size int) []byte {
 	t.Helper()
 	buf := make([]byte, size)
 	_, err := rand.Read(buf)
