@@ -44,6 +44,9 @@ type Access struct {
 //   - PUT .../{oid}
 //   - POST .../verify
 //
+// The upload and verify requests of a storage.Presigner carry an upload ID in
+// the "upload" query parameter, which the caller must pass through unchanged.
+//
 // The request's Authorization header is forwarded in the actions of batch
 // responses, so the client authenticates transfers with the same credentials.
 func (s *Service) Serve(logger *slog.Logger, w http.ResponseWriter, r *http.Request, access Access) {
@@ -114,20 +117,17 @@ func (s *Service) serveUpload(logger *slog.Logger, w http.ResponseWriter, r *htt
 	}
 
 	defer func() { _ = r.Body.Close() }()
-	result, err := s.Upload(r.Context(), logger, access.Repo, oid, r.ContentLength, r.Body)
+	result, err := s.Upload(r.Context(), logger, access.Repo, oid, r.URL.Query().Get(uploadQueryParam), r.ContentLength, r.Body)
 	if err != nil {
 		writeServiceError(logger.With("oid", oid), w, r, err, http.StatusText(http.StatusInternalServerError))
 		return
 	}
 
-	switch {
-	case result.Redirect != nil:
+	if result.Redirect != nil {
 		writeRedirect(w, result.Redirect)
-	case result.Existed:
-		w.WriteHeader(http.StatusOK)
-	default:
-		w.WriteHeader(http.StatusNoContent)
+		return
 	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Service) serveDownload(logger *slog.Logger, w http.ResponseWriter, r *http.Request, access Access, oid string) {
@@ -170,7 +170,7 @@ func (s *Service) serveVerify(logger *slog.Logger, w http.ResponseWriter, r *htt
 		return
 	}
 
-	if err := s.Verify(r.Context(), logger, access.Repo, req); err != nil {
+	if err := s.Verify(r.Context(), logger, access.Repo, r.URL.Query().Get(uploadQueryParam), req); err != nil {
 		writeServiceError(logger.With("oid", req.OID), w, r, err, http.StatusText(http.StatusInternalServerError))
 		return
 	}

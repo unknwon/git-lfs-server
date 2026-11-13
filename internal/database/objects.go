@@ -156,24 +156,6 @@ WHERE id = @id`,
 	return storedURI, nil
 }
 
-// GetObjects fetches verified objects for the given OIDs. Results are keyed by
-// OID, silently dropping missing OIDs.
-func (d *DB) GetObjects(ctx context.Context, oids []string) (map[string]lfs.Object, error) {
-	if len(oids) == 0 {
-		return map[string]lfs.Object{}, nil
-	}
-	var rows []Object
-	err := d.db.WithContext(ctx).Raw(`
-SELECT * FROM objects
-WHERE oid = ANY(@oids) AND verified_at IS NOT NULL`,
-		map[string]any{"oids": pq.Array(oids)},
-	).Scan(&rows).Error
-	if err != nil {
-		return nil, errors.Wrap(err, "select objects by OIDs")
-	}
-	return verifiedObjectsByOID(rows), nil
-}
-
 // GetRepoObjects fetches verified objects for the given OIDs that are linked to
 // the repository. Results are keyed by OID, silently dropping missing OIDs.
 func (d *DB) GetRepoObjects(ctx context.Context, repoName string, oids []string) (map[string]lfs.Object, error) {
