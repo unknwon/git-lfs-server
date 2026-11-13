@@ -32,7 +32,7 @@ func authorize(logger *logx.Logger, forges map[string]forge.Provider) flamego.Ha
 		username, token, ok := c.Request().BasicAuth()
 		if !ok || token == "" {
 			c.ResponseWriter().Header().Set("WWW-Authenticate", `Basic realm="git-lfs"`)
-			lfs.WriteError(c.ResponseWriter(), http.StatusUnauthorized, "basic auth credentials are required")
+			lfs.WriteError(c.ResponseWriter(), http.StatusUnauthorized, "HTTP Basic Auth credentials are required")
 			return
 		}
 

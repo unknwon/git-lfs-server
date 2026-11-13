@@ -1,9 +1,34 @@
 // Package lfs implements the server side of the Git LFS Batch API and the
 // basic transfer adapter on top of pluggable metadata and object storage.
 //
-// It leaves HTTP routing, authentication, authorization, and the encoding of
-// responses to the caller, so that servers with different URL layouts,
-// credentials, and databases can share the transfer logic.
+// It leaves HTTP routing, authentication, and authorization to the caller, so
+// that servers with different URL layouts, credentials, and databases can
+// share the transfer logic. It is a separate Go module so that importers do
+// not pull in the dependencies of lfsd (PostgreSQL, Flamego, forge clients).
+//
+// A [Service] combines a [Store], which records objects and the repositories
+// they are linked to, with a storage.Backend, which holds the content. A
+// storage.Proxier backend (e.g., storage.FilesystemBackend) streams
+// content through the server, and a storage.Presigner backend (e.g.,
+// storage.S3PresignBackend) redirects clients to the storage.
+//
+// [Service.Serve] handles the HTTP requests of the batch, upload, download,
+// and verify endpoints. The caller routes the requests, authenticates them,
+// and passes an [Access] with the repository, the base URL of its endpoints,
+// and whether the actor can read and write. Serve works with any router that
+// can run a net/http handler, e.g., Flamego, Macaron, or [net/http.ServeMux]:
+//
+//	mux.HandleFunc("/{repo}/info/lfs/objects/", func(w http.ResponseWriter, r *http.Request) {
+//		access, ok := authorize(w, r) // Your authentication and authorization.
+//		if !ok {
+//			return
+//		}
+//		service.Serve(logger, w, r, access)
+//	})
+//
+// The lower-level [Service.Batch], [Service.Upload], [Service.Download], and
+// [Service.Verify] methods are available for servers that need their own HTTP
+// handling.
 //
 // Spec: https://github.com/git-lfs/git-lfs/blob/main/docs/api/batch.md
 package lfs

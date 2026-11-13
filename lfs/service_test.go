@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -344,32 +345,34 @@ func TestService_Presign(t *testing.T) {
 	}
 
 	for _, crossRepoDedup := range []bool{false, true} {
-		s := &Service{Store: newMemStore(), Storage: newS3PresignBackend(t), CrossRepoDedup: crossRepoDedup}
+		t.Run(fmt.Sprintf("crossRepoDedup=%v", crossRepoDedup), func(t *testing.T) {
+			s := &Service{Store: newMemStore(), Storage: newS3PresignBackend(t), CrossRepoDedup: crossRepoDedup}
 
-		result, err := s.Upload(ctx, discardLogger, "repo1", oid, size, nil)
-		require.NoError(t, err)
-		require.NotNil(t, result.Redirect)
-		requireLFSError(t, s.Verify(ctx, discardLogger, "repo1", VerifyRequest{OID: oid, Size: size}), http.StatusUnprocessableEntity)
-		_, err = s.Download(ctx, "repo1", oid)
-		requireLFSError(t, err, http.StatusNotFound)
+			result, err := s.Upload(ctx, discardLogger, "repo1", oid, size, nil)
+			require.NoError(t, err)
+			require.NotNil(t, result.Redirect)
+			requireLFSError(t, s.Verify(ctx, discardLogger, "repo1", VerifyRequest{OID: oid, Size: size}), http.StatusUnprocessableEntity)
+			_, err = s.Download(ctx, "repo1", oid)
+			requireLFSError(t, err, http.StatusNotFound)
 
-		uploadToRedirect(t, result.Redirect)
-		requireLFSError(t, s.Verify(ctx, discardLogger, "repo1", VerifyRequest{OID: oid, Size: size + 1}), http.StatusUnprocessableEntity)
-		require.NoError(t, s.Verify(ctx, discardLogger, "repo1", VerifyRequest{OID: oid, Size: size}))
+			uploadToRedirect(t, result.Redirect)
+			requireLFSError(t, s.Verify(ctx, discardLogger, "repo1", VerifyRequest{OID: oid, Size: size + 1}), http.StatusUnprocessableEntity)
+			require.NoError(t, s.Verify(ctx, discardLogger, "repo1", VerifyRequest{OID: oid, Size: size}))
 
-		download, err := s.Download(ctx, "repo1", oid)
-		require.NoError(t, err)
-		require.NotNil(t, download.Redirect)
-		assert.Contains(t, download.Redirect.URL, oid)
+			download, err := s.Download(ctx, "repo1", oid)
+			require.NoError(t, err)
+			require.NotNil(t, download.Redirect)
+			assert.Contains(t, download.Redirect.URL, oid)
 
-		result, err = s.Upload(ctx, discardLogger, "repo1", oid, size, nil)
-		require.NoError(t, err)
-		assert.Equal(t, &UploadResult{Existed: true}, result)
+			result, err = s.Upload(ctx, discardLogger, "repo1", oid, size, nil)
+			require.NoError(t, err)
+			assert.Equal(t, &UploadResult{Existed: true}, result)
 
-		// Without cross-repo dedup, another repository must upload the content
-		// itself, which the storage checks against the OID.
-		result, err = s.Upload(ctx, discardLogger, "repo2", oid, size, nil)
-		require.NoError(t, err)
-		assert.Equal(t, crossRepoDedup, result.Redirect == nil, "crossRepoDedup=%v", crossRepoDedup)
+			// Without cross-repo dedup, another repository must upload the content
+			// itself, which the storage checks against the OID.
+			result, err = s.Upload(ctx, discardLogger, "repo2", oid, size, nil)
+			require.NoError(t, err)
+			assert.Equal(t, crossRepoDedup, result.Redirect == nil)
+		})
 	}
 }

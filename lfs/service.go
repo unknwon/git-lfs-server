@@ -161,9 +161,17 @@ func (s *Service) Batch(ctx context.Context, logger *slog.Logger, repo string, e
 // repo does not need to send again.
 func (s *Service) uploadedObjects(ctx context.Context, repo string, oids []string) (map[string]Object, error) {
 	if s.CrossRepoDedup {
-		return s.Store.GetObjects(ctx, oids)
+		objects, err := s.Store.GetObjects(ctx, oids)
+		if err != nil {
+			return nil, errors.Wrap(err, "get objects")
+		}
+		return objects, nil
 	}
-	return s.Store.GetRepoObjects(ctx, repo, oids)
+	objects, err := s.Store.GetRepoObjects(ctx, repo, oids)
+	if err != nil {
+		return nil, errors.Wrap(err, "get repository objects")
+	}
+	return objects, nil
 }
 
 // UploadResult is the outcome of a successful Service.Upload.

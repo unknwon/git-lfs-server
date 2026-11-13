@@ -65,9 +65,9 @@ func TestService_Serve(t *testing.T) {
 		requireError(t, serve(s, readWrite, http.MethodPost, "/verify", verify), http.StatusNotFound)
 
 		w = serve(s, readWrite, http.MethodPut, "/"+oid, content)
-		assert.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+		require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
 		w = serve(s, readWrite, http.MethodPost, "/verify", verify)
-		assert.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+		require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
 
 		w = serve(s, readWrite, http.MethodGet, "/"+oid, "")
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())

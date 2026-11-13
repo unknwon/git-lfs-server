@@ -96,23 +96,7 @@ The allowlist is enforced before the forge token check, so a request for a disal
 
 ## Using as a library
 
-The `unknwon.dev/git-lfs-server/lfs` module implements the Batch API and the basic transfer adapter for other Git servers to embed. It is a separate Go module so that importers do not pull in the dependencies of lfsd (PostgreSQL, Flamego, forge clients).
-
-An `lfs.Service` combines an `lfs.Store`, which records objects and the repositories they are linked to, with a `storage.Backend`, which holds the content. A `storage.Proxier` backend (e.g., `storage.FilesystemBackend`) streams content through the server, and a `storage.Presigner` backend (e.g., `storage.S3PresignBackend`) redirects clients to the storage. `PreviousStorages` keeps objects readable after the backend for new uploads changes.
-
-`Service.Serve` handles the HTTP requests of the batch, upload, download, and verify endpoints. The caller routes the requests, authenticates them, and passes an `lfs.Access` with the repository, the base URL of its endpoints, and whether the actor can read and write. `Serve` works with any router that can run a `net/http` handler, e.g., Flamego, Macaron, or `http.ServeMux`:
-
-```go
-mux.HandleFunc("/{repo}/info/lfs/objects/", func(w http.ResponseWriter, r *http.Request) {
-	access, ok := authorize(w, r) // Your authentication and authorization.
-	if !ok {
-		return
-	}
-	service.Serve(logger, w, r, access)
-})
-```
-
-The lower-level `Batch`, `Upload`, `Download`, and `Verify` methods are available for servers that need their own HTTP handling.
+The Git LFS logic of lfsd is available as the Go module `unknwon.dev/git-lfs-server/lfs`, with the same storage backends. See its [package documentation](https://pkg.go.dev/unknwon.dev/git-lfs-server/lfs) for usage.
 
 ## Local development
 
