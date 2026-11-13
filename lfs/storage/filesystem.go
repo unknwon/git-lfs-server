@@ -90,6 +90,12 @@ func (b *FilesystemBackend) Put(ctx context.Context, oid string, r io.Reader) (s
 		return "", errors.Wrap(err, "create object dir")
 	}
 	if err = os.Rename(tmpPath, final); err != nil {
+		// On Windows, renaming onto a path that a concurrent upload of the same OID
+		// is renaming onto fails with "Access is denied". The content is addressed
+		// by its OID, so the other upload's file is just as good.
+		if _, statErr := os.Stat(final); statErr == nil {
+			return uri, nil
+		}
 		return "", errors.Wrap(err, "rename to final path")
 	}
 	return uri, nil
