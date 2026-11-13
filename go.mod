@@ -20,6 +20,7 @@ require (
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.1
 	unknwon.dev/ini/v2 v2.0.0-beta.4
+	unknwon.dev/x v0.0.0-20261031163318-04af03672776
 )
 
 require (

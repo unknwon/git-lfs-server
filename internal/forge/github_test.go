@@ -6,8 +6,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-
-	"unknwon.dev/git-lfs-server/internal/logx"
+	"unknwon.dev/x/logx"
 )
 
 func TestGitHubTokenTTL(t *testing.T) {

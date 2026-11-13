@@ -12,14 +12,13 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/flamego/cache"
 	"github.com/flamego/flamego"
+	"unknwon.dev/x/logx"
 
 	"unknwon.dev/git-lfs-server/internal/forge"
-	"unknwon.dev/git-lfs-server/internal/logx"
 )
 
-func authorize(forges map[string]forge.Provider) flamego.Handler {
-	return func(c flamego.Context, logger *logx.Logger, cache cache.Cache) {
-		logger = logger.Scoped("authorize")
+func authorize(logger *logx.Logger, forges map[string]forge.Provider) flamego.Handler {
+	return func(c flamego.Context, cache cache.Cache) {
 		ctx := c.Request().Context()
 
 		host := hostFromContext(c)

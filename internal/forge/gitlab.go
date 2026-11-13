@@ -9,8 +9,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
-	"unknwon.dev/git-lfs-server/internal/logx"
+	"unknwon.dev/x/logx"
 )
 
 var _ Provider = (*GitLabProvider)(nil)
