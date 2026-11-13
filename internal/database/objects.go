@@ -1,6 +1,7 @@
 package database
 
 import (
+	"cmp"
 	"context"
 	"strconv"
 	"time"
@@ -9,7 +10,6 @@ import (
 	"github.com/lib/pq"
 	"gorm.io/gorm"
 
-	"unknwon.dev/git-lfs-server/internal/ptrx"
 	"unknwon.dev/git-lfs-server/lfs"
 )
 
@@ -47,10 +47,10 @@ RETURNING *`,
 		).Scan(&object).Error; err != nil {
 			return errors.Wrap(err, "upsert object")
 		}
-		if storedSize := ptrx.Deref(object.Size, -1); storedSize != size {
+		if storedSize := *cmp.Or(object.Size, new(int64(-1))); storedSize != size {
 			return errors.Newf("oid %q already stored with size %d (request claimed %d)", oid, storedSize, size)
 		}
-		storedURI = ptrx.Deref(object.ObjectURI, "")
+		storedURI = *cmp.Or(object.ObjectURI, new(""))
 		if storedURI == "" {
 			return errors.Newf("oid %q upserted without object_uri", oid)
 		}
@@ -121,10 +121,10 @@ WHERE oid = @oid AND verified_at IS NULL`,
 		if object.ID == 0 {
 			return errors.WithStack(ErrObjectNotFound)
 		}
-		if storedSize := ptrx.Deref(object.Size, -1); storedSize != size {
+		if storedSize := *cmp.Or(object.Size, new(int64(-1))); storedSize != size {
 			return errors.Newf("oid %q stored with size %d (verify claimed %d)", oid, storedSize, size)
 		}
-		storedURI = ptrx.Deref(object.ObjectURI, "")
+		storedURI = *cmp.Or(object.ObjectURI, new(""))
 		if storedURI == "" {
 			return errors.Newf("oid %q verified without object_uri", oid)
 		}
@@ -204,8 +204,8 @@ func verifiedObjectsByOID(rows []Object) map[string]lfs.Object {
 	for _, r := range rows {
 		out[r.OID] = lfs.Object{
 			OID:  r.OID,
-			Size: ptrx.Deref(r.Size, -1),
-			URI:  ptrx.Deref(r.ObjectURI, ""),
+			Size: *cmp.Or(r.Size, new(int64(-1))),
+			URI:  *cmp.Or(r.ObjectURI, new("")),
 		}
 	}
 	return out
