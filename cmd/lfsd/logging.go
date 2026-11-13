@@ -44,5 +44,5 @@ func setupLogging(cfg LogConfig) *logx.Logger {
 		Foreground(lipgloss.Color("226"))
 	handler.SetStyles(styles)
 
-	return logx.New(handler)
+	return logx.New(logx.NewTraceHandler(handler))
 }

@@ -12,12 +12,16 @@ import (
 	"github.com/flamego/cache"
 	"github.com/flamego/flamego"
 	"github.com/sourcegraph/conc"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"unknwon.dev/git-lfs-server/internal/database"
 	"unknwon.dev/git-lfs-server/internal/forge"
 	"unknwon.dev/git-lfs-server/internal/janitor"
 	"unknwon.dev/git-lfs-server/internal/logx"
 	"unknwon.dev/git-lfs-server/internal/strx"
+	"unknwon.dev/git-lfs-server/internal/tracing"
 	"unknwon.dev/git-lfs-server/lfs"
 )
 
@@ -38,6 +42,15 @@ func main() {
 
 	ctx := context.Background()
 	logger := setupLogging(config.Log)
+
+	// Set up before anything that creates spans, e.g., the database plugin.
+	shutdownTracing, err := tracing.Setup(ctx, config.Tracing, buildCommit)
+	if err != nil {
+		logger.FatalContext(ctx, "Failed to set up tracing", "error", err)
+	}
+	if config.Tracing.Enabled {
+		logger.InfoContext(ctx, "Tracing enabled", "sampleRatio", config.Tracing.SampleRatio)
+	}
 
 	for host, provider := range config.Forges {
 		logger.InfoContext(ctx, "Forge initialized", "host", host, "type", provider.Type())
@@ -71,19 +84,23 @@ func main() {
 		}
 	}
 	serve := serveLFS(config.Server.ExternalURL, services)
-	f.Group("/{host}/{**}/info/lfs/objects", func() {
-		f.Post("/batch", serve)
-		f.Get("/{oid}", serve)
-		f.Put("/{oid}", serve)
-		f.Post("/verify", serve)
-	}, authorize(config.Forges))
+	auth := authorize(config.Forges)
+	const objectsRoute = "/{host}/{**}/info/lfs/objects"
+	f.Group(objectsRoute, func() {
+		f.Post("/batch", traceRoute(objectsRoute+"/batch"), auth, serve)
+		f.Get("/{oid}", traceRoute(objectsRoute+"/{oid}"), auth, serve)
+		f.Put("/{oid}", traceRoute(objectsRoute+"/{oid}"), auth, serve)
+		f.Post("/verify", traceRoute(objectsRoute+"/verify"), auth, serve)
+	})
 
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	srv := &http.Server{
-		Addr:    config.Server.ListenAddress,
-		Handler: f,
+		Addr: config.Server.ListenAddress,
+		Handler: otelhttp.NewHandler(f, "lfsd",
+			otelhttp.WithFilter(func(r *http.Request) bool { return r.URL.Path != "/healthz" }),
+		),
 	}
 
 	var routines conc.WaitGroup
@@ -108,8 +125,28 @@ func main() {
 		"buildDate", buildDate, "buildCommit", buildCommit,
 		"listenAddr", config.Server.ListenAddress,
 	)
-	if r := routines.WaitAndRecover(); r != nil {
+	r := routines.WaitAndRecover()
+	// Flush the spans of the requests that finished during shutdown. The
+	// signal context is already canceled, so the flush gets its own.
+	if err := shutdownTracing(context.Background()); err != nil {
+		logger.ErrorContext(ctx, "Failed to shut down tracing", "error", err)
+	}
+	if r != nil {
 		logger.FatalContext(ctx, "Server panicked", "panic", r.Value, "stack", string(r.Stack))
+	}
+}
+
+// traceRoute names the server span of the request after route, because the
+// otelhttp handler wraps the router and does not know which route matched.
+func traceRoute(route string) flamego.Handler {
+	return func(c flamego.Context) {
+		span := trace.SpanFromContext(c.Request().Context())
+		span.SetName(c.Request().Method + " " + route)
+		span.SetAttributes(
+			attribute.String("http.route", route),
+			attribute.String("lfs.forge.host", hostFromContext(c)),
+			attribute.String("lfs.repo", repoNameFromContext(c)),
+		)
 	}
 }
 

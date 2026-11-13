@@ -2,10 +2,18 @@ package forge
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 
 	"unknwon.dev/git-lfs-server/internal/logx"
 )
@@ -56,4 +64,44 @@ func TestGitHubTokenTTL(t *testing.T) {
 		expiry := time.Now().UTC().Add(-1 * time.Minute).Format(layoutClassic)
 		assert.Negative(t, githubTokenTTL(ctx, logger, expiry))
 	})
+}
+
+func TestGitHubProvider_Tracing(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	// The forge client uses the global provider and must ignore the global
+	// propagator, so install both to prove that nothing is propagated.
+	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+
+	const token = "ghp_secret"
+	var gotHeader http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Clone()
+		_, _ = w.Write([]byte(`{"permissions":{"pull":true,"push":true}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	provider := NewGitHubProvider("github.example.com", nil)
+	provider.apiBase = server.URL
+
+	ctx, parent := tp.Tracer("test").Start(t.Context(), "parent")
+	perm, _, err := provider.Authorize(ctx, logx.NewNoopLogger(), "org/repo", "x-access-token", token)
+	parent.End()
+	require.NoError(t, err)
+	assert.Equal(t, PermissionWrite, perm)
+
+	assert.Empty(t, gotHeader.Get("traceparent"), "trace context must not be sent to the forge")
+
+	var client sdktrace.ReadOnlySpan
+	for _, span := range recorder.Ended() {
+		if span.SpanKind() == trace.SpanKindClient {
+			client = span
+		}
+	}
+	require.NotNil(t, client, "forge call must be traced")
+	assert.Equal(t, parent.SpanContext().SpanID(), client.Parent().SpanID())
+	for _, a := range client.Attributes() {
+		assert.NotContains(t, a.Value.String(), token, "attribute %s", a.Key)
+	}
 }

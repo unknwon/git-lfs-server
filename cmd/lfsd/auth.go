@@ -12,6 +12,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/flamego/cache"
 	"github.com/flamego/flamego"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 
 	"unknwon.dev/git-lfs-server/internal/forge"
 	"unknwon.dev/git-lfs-server/internal/logx"
@@ -21,9 +23,12 @@ import (
 func authorize(forges map[string]forge.Provider) flamego.Handler {
 	return func(c flamego.Context, logger *logx.Logger, cache cache.Cache) {
 		logger = logger.Scoped("authorize")
-		ctx := c.Request().Context()
-
 		host := hostFromContext(c)
+		// The span never carries credentials: the forge decides access, and only
+		// its outcome is recorded.
+		ctx, span := otel.Tracer("unknwon.dev/git-lfs-server/cmd/lfsd").Start(c.Request().Context(), "authorize")
+		defer span.End()
+
 		provider, ok := forges[host]
 		if !ok {
 			lfs.WriteError(c.ResponseWriter(), http.StatusBadRequest, "unsupported forge host")
@@ -52,6 +57,7 @@ func authorize(forges map[string]forge.Provider) flamego.Handler {
 		key := authCacheKey(host, repo, username, token)
 		if v, err := cache.Get(ctx, key); err == nil {
 			if perm, ok := v.(forge.Permission); ok {
+				span.SetAttributes(attribute.Bool("lfs.auth.cache_hit", true), attribute.String("lfs.permission", string(perm)))
 				c.Map(perm)
 				return
 			}
@@ -60,9 +66,11 @@ func authorize(forges map[string]forge.Provider) flamego.Handler {
 			logger.WarnContext(ctx, "Auth cache lookup failed", "error", err)
 		}
 
+		span.SetAttributes(attribute.Bool("lfs.auth.cache_hit", false))
 		perm, rawTTL, err := provider.Authorize(ctx, logger.Scoped("forge"), repo, username, token)
 		if err != nil {
 			if errors.Is(err, forge.ErrTokenInvalid) {
+				span.SetAttributes(attribute.Bool("lfs.auth.token_invalid", true))
 				lfs.WriteError(c.ResponseWriter(), http.StatusForbidden, "token is invalid or lacks repository access")
 			} else {
 				logger.ErrorContext(ctx, "Failed to verify repository permissions", "repo", repo, "error", err)
@@ -81,6 +89,7 @@ func authorize(forges map[string]forge.Provider) flamego.Handler {
 			}
 		}
 
+		span.SetAttributes(attribute.String("lfs.permission", string(perm)))
 		c.Map(perm)
 	}
 }

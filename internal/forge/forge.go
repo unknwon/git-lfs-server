@@ -2,10 +2,13 @@ package forge
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/propagation"
 
 	"unknwon.dev/git-lfs-server/internal/logx"
 )
@@ -67,6 +70,18 @@ type Provider interface {
 	//   - Positive: the raw time until the token expires. The caller should
 	//     apply a safety margin and a maximum cap before caching.
 	Authorize(ctx context.Context, logger *logx.Logger, repo, username, token string) (Permission, time.Duration, error)
+}
+
+// newHTTPClient returns the client for forge API calls. Its calls are traced as
+// children of the caller's span, but the trace context is not sent to the
+// forge, which is outside of our trust boundary.
+func newHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: otelhttp.NewTransport(http.DefaultTransport,
+			otelhttp.WithPropagators(propagation.NewCompositeTextMapPropagator()),
+		),
+	}
 }
 
 // ErrTokenInvalid signals that the supplied token is invalid or lacks the

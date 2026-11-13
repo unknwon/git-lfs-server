@@ -6,6 +6,9 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"unknwon.dev/git-lfs-server/internal/database"
 	"unknwon.dev/git-lfs-server/internal/logx"
@@ -61,17 +64,25 @@ func (j *Janitor) Run(ctx context.Context, logger *logx.Logger) {
 // Sweep runs both cleanup passes once. Errors are logged but not returned.
 // The next tick will retry.
 func (j *Janitor) Sweep(ctx context.Context, logger *logx.Logger) {
-	if objects, err := j.db.SweepOrphanObjects(ctx, orphanAge, sweepBatchSize); err != nil {
-		logger.ErrorContext(ctx, "Failed to sweep orphan objects", "error", err)
-	} else if len(objects) > 0 {
-		j.deleteObjects(ctx, logger.Scoped("orphan"), objects)
-	}
+	tracer := otel.Tracer("unknwon.dev/git-lfs-server/internal/janitor")
+	ctx, span := tracer.Start(ctx, "janitor.Sweep")
+	defer span.End()
 
-	if objects, err := j.db.SweepUnreferencedObjects(ctx, sweepBatchSize); err != nil {
-		logger.ErrorContext(ctx, "Failed to sweep unreferenced objects", "error", err)
+	orphanCtx, orphanSpan := tracer.Start(ctx, "janitor.SweepOrphans")
+	if objects, err := j.db.SweepOrphanObjects(orphanCtx, orphanAge, sweepBatchSize); err != nil {
+		logger.ErrorContext(orphanCtx, "Failed to sweep orphan objects", "error", err)
 	} else if len(objects) > 0 {
-		j.deleteObjects(ctx, logger.Scoped("unreferenced"), objects)
+		j.deleteObjects(orphanCtx, logger.Scoped("orphan"), objects)
 	}
+	orphanSpan.End()
+
+	unreferencedCtx, unreferencedSpan := tracer.Start(ctx, "janitor.SweepUnreferenced")
+	if objects, err := j.db.SweepUnreferencedObjects(unreferencedCtx, sweepBatchSize); err != nil {
+		logger.ErrorContext(unreferencedCtx, "Failed to sweep unreferenced objects", "error", err)
+	} else if len(objects) > 0 {
+		j.deleteObjects(unreferencedCtx, logger.Scoped("unreferenced"), objects)
+	}
+	unreferencedSpan.End()
 }
 
 // deleteObjects deletes the given list of objects from the storage backends.
@@ -106,6 +117,10 @@ func (j *Janitor) deleteObjects(ctx context.Context, logger *logx.Logger, object
 			deletedCount++
 		}
 	}
+	trace.SpanFromContext(ctx).SetAttributes(
+		attribute.Int("janitor.deleted_count", deletedCount),
+		attribute.Int("janitor.failed_count", failedCount),
+	)
 	logFn := logger.InfoContext
 	if failedCount > 0 {
 		logFn = logger.ErrorContext

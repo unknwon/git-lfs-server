@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	gormtracing "gorm.io/plugin/opentelemetry/tracing"
 
 	"unknwon.dev/git-lfs-server/internal/logx"
 )
@@ -57,6 +59,10 @@ func (d *DB) Ping(ctx context.Context) error {
 
 // New opens a PostgreSQL connection via GORM and configures the connection pool.
 func New(ctx context.Context, logger *logx.Logger, cfg Config) (*DB, error) {
+	// Groups the startup queries into one trace.
+	ctx, span := otel.Tracer("unknwon.dev/git-lfs-server/internal/database").Start(ctx, "database.New")
+	defer span.End()
+
 	dsn := fmt.Sprintf(
 		"postgres://%s:%s@%s:%d/%s?sslmode=%s&application_name=lfsd",
 		url.QueryEscape(cfg.User),
@@ -84,6 +90,12 @@ func New(ctx context.Context, logger *logx.Logger, cfg Config) (*DB, error) {
 		return nil, errors.Wrap(err, "open database connection")
 	}
 
+	// Leave bound values out of spans so that they never record request data,
+	// e.g., object URIs.
+	if err = gormDB.Use(gormtracing.NewPlugin(gormtracing.WithoutQueryVariables(), gormtracing.WithoutMetrics())); err != nil {
+		return nil, errors.Wrap(err, "register tracing plugin")
+	}
+
 	sqlDB, err := gormDB.DB()
 	if err != nil {
 		return nil, errors.Wrap(err, "get underlying *sql.DB")
@@ -109,14 +121,14 @@ func New(ctx context.Context, logger *logx.Logger, cfg Config) (*DB, error) {
 	}
 
 	logger.DebugContext(ctx, "Auto-migrating database tables")
-	if err = gormDB.AutoMigrate(tables...); err != nil {
+	if err = gormDB.WithContext(ctx).AutoMigrate(tables...); err != nil {
 		return nil, errors.Wrap(err, "auto-migrate database tables")
 	}
 
 	// AutoMigrate doesn't emit CHECK constraints. Add ours idempotently:
 	// Postgres has no "ADD CONSTRAINT IF NOT EXISTS" form for CHECK, so we
 	// catch duplicate_object via SQLSTATE.
-	if err = gormDB.Exec(`
+	if err = gormDB.WithContext(ctx).Exec(`
 DO $$ BEGIN
     ALTER TABLE objects ADD CONSTRAINT check_verified_consistency CHECK (
         (verified_at IS NULL     AND size IS NULL     AND object_uri IS NULL)

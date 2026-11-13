@@ -10,6 +10,7 @@ import (
 	"unknwon.dev/git-lfs-server/internal/database"
 	"unknwon.dev/git-lfs-server/internal/embed"
 	"unknwon.dev/git-lfs-server/internal/forge"
+	"unknwon.dev/git-lfs-server/internal/tracing"
 	"unknwon.dev/git-lfs-server/lfs/storage"
 )
 
@@ -22,6 +23,7 @@ type Config struct {
 	Forges   map[Host]forge.Provider
 	Storages map[Host]storage.Backend
 	Log      LogConfig
+	Tracing  tracing.Config
 }
 
 type ServerConfig struct {
@@ -61,6 +63,9 @@ func loadConfig(customPath string) (*Config, error) {
 	}
 	if err := f.Section("log").MapTo(&c.Log); err != nil {
 		return nil, errors.Wrap(err, `map [log] config`)
+	}
+	if err := f.Section("tracing").MapTo(&c.Tracing); err != nil {
+		return nil, errors.Wrap(err, `map [tracing] config`)
 	}
 
 	backendsByName := make(map[string]storage.Backend)
