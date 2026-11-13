@@ -6,8 +6,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
-	"unknwon.dev/git-lfs-server/internal/logx"
+	"unknwon.dev/x/logx"
 )
 
 // Type identifies a forge implementation. The value is used in ini

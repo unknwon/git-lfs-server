@@ -12,11 +12,11 @@ import (
 	"github.com/flamego/cache"
 	"github.com/flamego/flamego"
 	"github.com/sourcegraph/conc"
+	"unknwon.dev/x/logx"
 
 	"unknwon.dev/git-lfs-server/internal/database"
 	"unknwon.dev/git-lfs-server/internal/forge"
 	"unknwon.dev/git-lfs-server/internal/janitor"
-	"unknwon.dev/git-lfs-server/internal/logx"
 	"unknwon.dev/git-lfs-server/internal/strx"
 )
 
@@ -54,18 +54,17 @@ func main() {
 	}
 
 	f := flamego.New()
-	f.Map(logger)
 	f.Use(flamego.Recovery())
 	f.Use(cache.Cacher())
 
-	f.Get("/healthz", serveHealthz(db))
+	f.Get("/healthz", serveHealthz(logger.Scoped("healthz"), db))
 
 	f.Group("/{host}/{**}/info/lfs/objects", func() {
-		f.Post("/batch", serveBatch(db, config.Server.ExternalURL, config.Server.MaxObjectSize))
-		f.Get("/{oid}", serveDownload(db, config.Storages))
-		f.Put("/{oid}", serveUpload(db, config.Storages, config.Server.MaxObjectSize))
-		f.Post("/verify", serveVerify(db, config.Storages))
-	}, authorize(config.Forges))
+		f.Post("/batch", serveBatch(logger.Scoped("batch"), db, config.Server.ExternalURL, config.Server.MaxObjectSize))
+		f.Get("/{oid}", serveDownload(logger.Scoped("download"), db, config.Storages))
+		f.Put("/{oid}", serveUpload(logger.Scoped("upload"), db, config.Storages, config.Server.MaxObjectSize))
+		f.Post("/verify", serveVerify(logger.Scoped("verify"), db, config.Storages))
+	}, authorize(logger.Scoped("authorize"), config.Forges))
 
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -110,8 +109,8 @@ func repoNameFromContext(c flamego.Context) string {
 	return strings.ToLower(c.Param("host") + "/" + c.Param("**"))
 }
 
-func serveHealthz(db *database.DB) flamego.Handler {
-	return func(c flamego.Context, logger *logx.Logger) {
+func serveHealthz(logger *logx.Logger, db *database.DB) flamego.Handler {
+	return func(c flamego.Context) {
 		if err := db.Ping(c.Request().Context()); err != nil {
 			logger.ErrorContext(c.Request().Context(), "Health check failed", "error", err)
 			http.Error(c.ResponseWriter(), http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)

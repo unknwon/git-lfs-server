@@ -5,8 +5,7 @@ import (
 	"time"
 
 	gormlogger "gorm.io/gorm/logger"
-
-	"unknwon.dev/git-lfs-server/internal/logx"
+	"unknwon.dev/x/logx"
 )
 
 // logxWriter adapts *logx.Logger to GORM's logger.Writer interface so that

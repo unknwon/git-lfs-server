@@ -4,12 +4,12 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	charmlog "charm.land/log/v2"
 	"github.com/flamego/flamego"
-
-	"unknwon.dev/git-lfs-server/internal/logx"
+	"unknwon.dev/x/logx"
 )
 
 func parseLevel(s string) slog.Level {
@@ -28,6 +28,7 @@ func parseLevel(s string) slog.Level {
 func setupLogging(cfg LogConfig) *logx.Logger {
 	level := parseLevel(cfg.Level)
 	opts := charmlog.Options{
+		TimeFormat:      time.DateTime,
 		Level:           charmlog.Level(level),
 		ReportTimestamp: true,
 	}

@@ -14,11 +14,11 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/flamego/flamego"
+	"unknwon.dev/x/logx"
 
 	"unknwon.dev/git-lfs-server/internal/database"
 	"unknwon.dev/git-lfs-server/internal/forge"
 	"unknwon.dev/git-lfs-server/internal/iox"
-	"unknwon.dev/git-lfs-server/internal/logx"
 	"unknwon.dev/git-lfs-server/internal/ptrx"
 	"unknwon.dev/git-lfs-server/internal/storage"
 )
@@ -77,9 +77,8 @@ type verifyRequest struct {
 	Size int64  `json:"size"`
 }
 
-func serveBatch(db *database.DB, externalURL string, maxObjectSize int64) flamego.Handler {
-	return func(c flamego.Context, logger *logx.Logger, perm forge.Permission) {
-		logger = logger.Scoped("batch")
+func serveBatch(logger *logx.Logger, db *database.DB, externalURL string, maxObjectSize int64) flamego.Handler {
+	return func(c flamego.Context, perm forge.Permission) {
 		ctx := c.Request().Context()
 
 		body := http.MaxBytesReader(c.ResponseWriter(), c.Request().Body().ReadCloser(), maxJSONRequestBytes)
@@ -210,9 +209,8 @@ func serveBatch(db *database.DB, externalURL string, maxObjectSize int64) flameg
 	}
 }
 
-func serveUpload(db *database.DB, storages map[string]storage.Backend, maxObjectSize int64) flamego.Handler {
-	return func(c flamego.Context, logger *logx.Logger, perm forge.Permission) {
-		logger = logger.Scoped("upload")
+func serveUpload(logger *logx.Logger, db *database.DB, storages map[string]storage.Backend, maxObjectSize int64) flamego.Handler {
+	return func(c flamego.Context, perm forge.Permission) {
 		ctx := c.Request().Context()
 
 		if perm != forge.PermissionWrite {
@@ -330,9 +328,8 @@ func serveUploadPresign(c flamego.Context, logger *logx.Logger, db *database.DB,
 	w.WriteHeader(http.StatusTemporaryRedirect)
 }
 
-func serveDownload(db *database.DB, storages map[string]storage.Backend) flamego.Handler {
-	return func(c flamego.Context, logger *logx.Logger, perm forge.Permission) {
-		logger = logger.Scoped("download")
+func serveDownload(logger *logx.Logger, db *database.DB, storages map[string]storage.Backend) flamego.Handler {
+	return func(c flamego.Context, perm forge.Permission) {
 		ctx := c.Request().Context()
 
 		if perm != forge.PermissionRead && perm != forge.PermissionWrite {
@@ -425,9 +422,8 @@ func serveDownloadPresign(c flamego.Context, logger *logx.Logger, backend storag
 	w.WriteHeader(http.StatusTemporaryRedirect)
 }
 
-func serveVerify(db *database.DB, storages map[string]storage.Backend) flamego.Handler {
-	return func(c flamego.Context, logger *logx.Logger, perm forge.Permission) {
-		logger = logger.Scoped("verify")
+func serveVerify(logger *logx.Logger, db *database.DB, storages map[string]storage.Backend) flamego.Handler {
+	return func(c flamego.Context, perm forge.Permission) {
 		ctx := c.Request().Context()
 
 		if perm != forge.PermissionWrite {

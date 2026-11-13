@@ -9,8 +9,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-
-	"unknwon.dev/git-lfs-server/internal/logx"
+	"unknwon.dev/x/logx"
 )
 
 // Config holds PostgreSQL connection and pool settings. The ConnMaxLifetime and
